@@ -1,7 +1,7 @@
 # Channel Management Service MVP Design
 
 **Date:** 2026-04-03
-**Status:** Draft
+**Status:** Approved
 **Scope:** `Hertz` HTTP service for centralized channel account management, first channel is `wechat`
 
 ## Problem
@@ -344,6 +344,8 @@ If the provider cannot initialize the binding, the endpoint returns an error env
 
 This endpoint is not a pure database read in MVP. Each call refreshes provider state using `provider_binding_ref`, persists any state change, and then returns the latest stored view. Polling clients should treat this endpoint as the authoritative refresh path.
 
+For polling ergonomics, this endpoint always returns envelope `code = OK` when the binding exists, even if `data.status` is `failed` or `expired`. Callers should branch on `data.status` for terminal binding states.
+
 Response data:
 
 - `binding_id`
@@ -488,6 +490,19 @@ Minimum business error codes:
 - `INTERNAL_ERROR`
 
 Do not overload transport-level 500 errors for expected business states such as expired QR code or disabled key.
+
+Endpoint-specific code rules for MVP:
+
+| Endpoint | Scenario | Envelope `code` |
+|---|---|---|
+| `POST /channel-bindings/create` | validation error | `INVALID_ARGUMENT` |
+| `POST /channel-bindings/create` | provider cannot initialize binding | `BINDING_FAILED` |
+| `GET /channel-bindings/detail` | binding not found | `NOT_FOUND` |
+| `GET /channel-bindings/detail` | binding exists and status is `qr_ready` / `confirmed` / `failed` / `expired` | `OK` |
+| `POST /channel-accounts/app-key/create` | channel account not found | `NOT_FOUND` |
+| `POST /channel-accounts/app-key/disable` | both identifiers provided | `INVALID_ARGUMENT` |
+| `GET /runtime/config` | app key missing or unknown | `APP_KEY_NOT_FOUND` |
+| `GET /runtime/config` | app key disabled | `APP_KEY_DISABLED` |
 
 ## Security Requirements
 
