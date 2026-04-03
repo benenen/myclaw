@@ -1,6 +1,6 @@
 # Channel Management Service Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build a Hertz-based HTTP service that manages WeChat channel bindings, stores credentials centrally, issues `app_key` values, and serves runtime configuration by `app_key`.
 
@@ -77,7 +77,7 @@
 - Test: `internal/config/config_test.go`
 - Test: `internal/api/http/response_test.go`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```go
 func TestLoadConfigRequiresMasterKey(t *testing.T) {
@@ -112,12 +112,12 @@ func TestNewPrefixedIDUsesULIDShape(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/config ./internal/api/http`
 Expected: FAIL with missing packages or undefined functions
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 type Config struct {
@@ -148,12 +148,12 @@ type Envelope struct {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/config ./internal/domain ./internal/api/http`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add go.mod cmd/server/main.go internal/config/config.go internal/bootstrap/bootstrap.go internal/domain/errors.go internal/domain/status.go internal/domain/ids.go internal/channel/provider.go internal/api/http/response.go internal/api/http/request_id.go internal/config/config_test.go internal/api/http/response_test.go
@@ -172,7 +172,7 @@ git commit -m "feat: bootstrap channel management service contracts"
 - Create: `internal/testutil/sqlite.go`
 - Test: `internal/store/db_test.go`
 
-- [ ] **Step 1: Write the failing migration test**
+- [x] **Step 1: Write the failing migration test**
 
 ```go
 func TestMigrateCreatesCoreTables(t *testing.T) {
@@ -187,12 +187,12 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/store -run TestMigrateCreatesCoreTables -v`
 Expected: FAIL with missing migration or helper implementation
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```sql
 CREATE TABLE users (
@@ -249,12 +249,12 @@ CREATE INDEX idx_app_keys_hash ON app_keys(app_key_hash);
 func Migrate(db *gorm.DB) error { /* apply 0001_init.sql */ }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/store -run TestMigrateCreatesCoreTables -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/store/migrations/0001_init.sql internal/store/db.go internal/store/models/*.go internal/testutil/sqlite.go internal/store/db_test.go
@@ -274,7 +274,7 @@ git commit -m "feat: add sqlite schema for channel management"
 - Test: `internal/store/repositories/channel_binding_repository_test.go`
 - Test: `internal/store/repositories/app_key_repository_test.go`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 ```go
 func TestUserRepositoryFindOrCreateByExternalUserID(t *testing.T) {
@@ -298,12 +298,12 @@ func TestChannelBindingRepositoryUpdateStatus(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/store/repositories -v`
 Expected: FAIL with undefined repository implementations
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 type UserRepository interface {
@@ -319,12 +319,12 @@ type ChannelBindingRepository interface {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/store/repositories -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/domain/repositories.go internal/store/repositories/*.go internal/store/repositories/*_test.go
@@ -339,7 +339,7 @@ git commit -m "feat: add repository layer for channel service"
 - Test: `internal/security/crypto_test.go`
 - Test: `internal/security/app_key_test.go`
 
-- [ ] **Step 1: Write failing crypto and key tests**
+- [x] **Step 1: Write failing crypto and key tests**
 
 ```go
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -362,12 +362,12 @@ func TestGenerateAppKeyReturnsPrefixAndHash(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/security -v`
 Expected: FAIL with missing implementations
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 func Generate() (plaintext string, prefix string, hash string, err error) {
@@ -379,12 +379,12 @@ func Generate() (plaintext string, prefix string, hash string, err error) {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/security -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/security/crypto.go internal/security/app_key.go internal/security/crypto_test.go internal/security/app_key_test.go
@@ -401,7 +401,7 @@ git commit -m "feat: add credential encryption and app key primitives"
 - Test: `internal/channel/wechat/provider_integration_test.go`
 - Test: `internal/channel/wechat/fake_provider_test.go`
 
-- [ ] **Step 1: Write failing provider contract tests**
+- [x] **Step 1: Write failing provider contract tests**
 
 ```go
 func TestFakeProviderCreateAndRefreshBinding(t *testing.T) {
@@ -420,12 +420,12 @@ func TestRealProviderSkipsWithoutWechatIntegrationEnv(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/channel/wechat -v`
 Expected: FAIL with missing provider implementation
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 type FakeProvider struct {
@@ -501,12 +501,12 @@ Status mapping must be exact:
 
 `credential_payload` must be JSON bytes encoded from the adapter response body field so `credential_version` stays meaningful across provider and runtime boundaries.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/channel/wechat -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/channel/wechat/config.go internal/channel/wechat/provider.go internal/channel/wechat/client.go internal/channel/wechat/fake_provider.go internal/channel/wechat/provider_integration_test.go internal/channel/wechat/fake_provider_test.go
@@ -519,7 +519,7 @@ git commit -m "feat: add real and fake wechat providers"
 - Create: `internal/app/binding_service.go`
 - Test: `internal/app/binding_service_test.go`
 
-- [ ] **Step 1: Write failing binding service tests**
+- [x] **Step 1: Write failing binding service tests**
 
 ```go
 func TestCreateBindingCreatesUserAndReturnsQRReady(t *testing.T) {
@@ -546,12 +546,12 @@ func TestGetBindingDetailRefreshesProviderAndConfirmsAccount(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/app -run 'Test(CreateBinding|GetBindingDetail)' -v`
 Expected: FAIL with undefined service implementation
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 type BindingService struct {
@@ -569,12 +569,12 @@ func (s *BindingService) GetBindingDetail(ctx context.Context, id string) (Bindi
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/app -run 'Test(CreateBinding|GetBindingDetail)' -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/app/binding_service.go internal/app/binding_service_test.go
@@ -591,7 +591,7 @@ git commit -m "feat: add binding application service"
 - Test: `internal/app/runtime_service_test.go`
 - Test: `internal/app/channel_account_query_service_test.go`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 ```go
 func TestCreateAppKeyRotatesExistingKey(t *testing.T) {
@@ -630,12 +630,12 @@ func TestListAccountsIncludesHasActiveAppKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/app -run 'Test(CreateAppKey|RuntimeService)' -v`
 Expected: FAIL with undefined services
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 func (s *AppKeyService) CreateOrRotate(ctx context.Context, channelAccountID string) (AppKeyResult, error) {
@@ -655,12 +655,12 @@ func (s *ChannelAccountQueryService) ListByExternalUserID(ctx context.Context, e
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/app -run 'Test(CreateAppKey|RuntimeService|DisableByChannelAccountID|ListAccounts)' -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/app/app_key_service.go internal/app/runtime_service.go internal/app/channel_account_query_service.go internal/app/app_key_service_test.go internal/app/runtime_service_test.go internal/app/channel_account_query_service_test.go
@@ -683,7 +683,7 @@ git commit -m "feat: add app key runtime and account query services"
 - Test: `internal/api/http/handlers/runtime_test.go`
 - Test: `internal/api/http/handlers/errors_test.go`
 
-- [ ] **Step 1: Write failing handler tests**
+- [x] **Step 1: Write failing handler tests**
 
 ```go
 func TestCreateBindingHandlerReturnsEnvelope(t *testing.T) {
@@ -715,12 +715,12 @@ func TestBindingDetailReturnsOKWithExpiredStatus(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/api/http/... -v`
 Expected: FAIL with missing router and handlers
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 func RegisterRoutes(h *server.Hertz, deps Dependencies) {
@@ -758,12 +758,12 @@ Endpoint code table to implement:
 | `GET /runtime/config` | app key missing or unknown | `APP_KEY_NOT_FOUND` |
 | `GET /runtime/config` | app key disabled | `APP_KEY_DISABLED` |
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/api/http/... -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/api/http/router.go internal/api/http/handlers/*.go internal/api/http/dto/*.go internal/testutil/http.go internal/api/http/handlers/*_test.go
@@ -778,7 +778,7 @@ git commit -m "feat: add hertz handlers for channel management api"
 - Create: `internal/bootstrap/bootstrap_test.go`
 - Create: `README.md`
 
-- [ ] **Step 1: Write failing bootstrap smoke tests**
+- [x] **Step 1: Write failing bootstrap smoke tests**
 
 ```go
 func TestBootstrapBuildsDependencies(t *testing.T) {
@@ -790,12 +790,12 @@ func TestBootstrapBuildsDependencies(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/bootstrap -v`
 Expected: FAIL with incomplete wiring
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```go
 func main() {
@@ -817,12 +817,12 @@ Update `README.md` with:
 - local run command
 - example API calls for create binding, polling detail, creating `app_key`, fetching runtime config
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/bootstrap -v && go test ./...`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/server/main.go internal/bootstrap/bootstrap.go internal/bootstrap/bootstrap_test.go README.md
@@ -831,10 +831,10 @@ git commit -m "feat: wire channel management service startup"
 
 ## Verification Checklist
 
-- [ ] `go test ./...`
-- [ ] Start the server locally against a temp SQLite database
-- [ ] `POST /api/v1/channel-bindings/create` returns `qr_ready`
-- [ ] `GET /api/v1/channel-bindings/detail` refreshes provider state and persists updates
-- [ ] `POST /api/v1/channel-accounts/app-key/create` returns plaintext `app_key` once
-- [ ] `POST /api/v1/channel-accounts/app-key/disable` is idempotent and rejects both identifiers at once
-- [ ] `GET /api/v1/runtime/config` reads `X-App-Key` and returns JSON `credential_blob.payload`
+- [x] `go test ./...`
+- [x] Start the server locally against a temp SQLite database
+- [x] `POST /api/v1/channel-bindings/create` returns `qr_ready`
+- [x] `GET /api/v1/channel-bindings/detail` refreshes provider state and persists updates
+- [x] `POST /api/v1/channel-accounts/app-key/create` returns plaintext `app_key` once
+- [x] `POST /api/v1/channel-accounts/app-key/disable` is idempotent and rejects both identifiers at once
+- [x] `GET /api/v1/runtime/config` reads `X-App-Key` and returns JSON `credential_blob.payload`
