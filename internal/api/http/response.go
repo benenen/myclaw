@@ -25,6 +25,15 @@ func WriteOKFromRequest(w stdhttp.ResponseWriter, r *stdhttp.Request, data any) 
 	WriteOK(w, RequestIDFromContext(r.Context()), data)
 }
 
+func WriteError(w stdhttp.ResponseWriter, r *stdhttp.Request, code string, message string) {
+	writeJSON(w, stdhttp.StatusOK, Envelope{
+		Code:      code,
+		Message:   message,
+		RequestID: RequestIDFromContext(r.Context()),
+		Data:      map[string]any{},
+	})
+}
+
 func writeJSON(w stdhttp.ResponseWriter, status int, body Envelope) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
