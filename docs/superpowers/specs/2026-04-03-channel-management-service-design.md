@@ -36,10 +36,12 @@ This service must solve four concrete problems:
 ## Context And Assumptions
 
 - Callers are trusted internal systems for MVP. They pass `user_id` to the management API.
+- API-level `user_id` always means the upstream external user identifier. Internally, this maps to `users.external_user_id`. Database foreign keys such as `channel_accounts.user_id` and `channel_bindings.user_id` reference the service-local `users.id`.
 - The service persists credentials and configuration centrally.
 - The plugin/runtime does not persist authoritative channel configuration. It fetches configuration from this service using `app_key`.
 - The plugin/runtime is responsible for starting MCP, Codex, CC, or other AI CLI processes after configuration fetch.
 - WeChat login behavior will be adapted from the reference implementation shape in `m1heng/claude-plugin-weixin`, but the external API and storage model in this service remain service-owned and channel-agnostic.
+- All externally visible resource IDs such as `bind_xxx`, `acct_xxx`, and `key_xxx` should use a sortable opaque ID format such as `ULID`.
 
 ## Recommended Architecture
 
@@ -92,11 +94,66 @@ Introduce a provider interface such as:
 type Provider interface {
     CreateBinding(ctx context.Context, req CreateBindingRequest) (CreateBindingResult, error)
     RefreshBinding(ctx context.Context, req RefreshBindingRequest) (RefreshBindingResult, error)
-    BuildRuntimeConfig(ctx context.Context, account ChannelAccount) (RuntimeConfig, error)
+    BuildRuntimeConfig(ctx context.Context, req BuildRuntimeConfigRequest) (RuntimeConfig, error)
 }
 ```
 
 The first implementation is `wechat`. This isolates channel-specific login behavior and credential shapes from the rest of the service.
+
+Minimal provider DTO semantics for MVP:
+
+```go
+type CreateBindingRequest struct {
+    BindingID   string
+    ChannelType string
+}
+
+type CreateBindingResult struct {
+    ProviderBindingRef string
+    QRCodePayload      string
+    ExpiresAt          time.Time
+}
+
+type RefreshBindingRequest struct {
+    ProviderBindingRef string
+}
+
+type RefreshBindingResult struct {
+    ProviderStatus    string
+    QRCodePayload     string
+    ExpiresAt         time.Time
+    AccountUID        string
+    DisplayName       string
+    AvatarURL         string
+    CredentialPayload []byte
+    CredentialVersion int
+    ErrorMessage      string
+}
+
+type BuildRuntimeConfigRequest struct {
+    AccountUID        string
+    CredentialPayload []byte
+    CredentialVersion int
+}
+```
+
+Rules:
+
+- `ProviderBindingRef` is the provider-side binding handle stored in `channel_bindings.provider_binding_ref`
+- `CreateBinding` must obtain the initial QR payload used by the create API response
+- `RefreshBinding` returns the latest provider state and may also return updated QR payload or expiry time
+- `BuildRuntimeConfig` consumes already decrypted provider credentials and never reads ciphertext directly
+
+Provider status mapping for WeChat MVP:
+
+| Provider status | Internal `channel_bindings.status` | Meaning |
+|---|---|---|
+| `qr_ready` | `qr_ready` | QR code is available and may be displayed |
+| `confirmed` | `confirmed` | Login succeeded and credentials are ready to persist |
+| `failed` | `failed` | Login attempt ended with a provider error |
+| `expired` | `expired` | QR code or binding session is no longer valid |
+
+`pending` remains an internal service-side transient state before the first successful provider response is written.
 
 ### 4. Storage Layer
 
@@ -111,6 +168,12 @@ This layer handles:
 - credential encryption and decryption
 - `app_key` generation and hashing
 - provider-specific secret serialization
+
+Responsibility boundary:
+
+- the security package encrypts and decrypts provider credential payloads
+- the application service calls security code and passes plaintext credential payloads into provider DTOs
+- channel providers never read ciphertext from storage and do not depend on the security package
 
 ## Domain Model
 
@@ -127,6 +190,8 @@ Suggested fields:
 - `updated_at`
 
 `external_user_id` is the upstream user identity passed by trusted callers.
+
+Repository and application service logic must resolve API `user_id` input to `users.id` before creating or querying any related records.
 
 ### `channel_accounts`
 
@@ -149,7 +214,7 @@ Suggested fields:
 
 Constraints:
 
-- unique key on `user_id + channel_type + account_uid`
+- unique key on `user_id + channel_type + account_uid`, where `user_id` here is the internal `users.id`
 - `channel_type` initially supports only `wechat`
 
 For WeChat, `account_uid` stores the stable account identifier obtained from the provider.
@@ -183,6 +248,16 @@ Suggested statuses:
 
 This table is required because QR-code login is asynchronous and a single channel account may go through multiple binding sessions over time.
 
+State transition rules for MVP:
+
+- newly created session starts at `pending`
+- during `POST /channel-bindings/create`, once QR payload is ready, move to `qr_ready`
+- on confirmed provider login, move to `confirmed`
+- on provider-side login failure, move to `failed`
+- on expiry time reached before confirmation, move to `expired`
+
+Expiry handling in MVP is request-driven. The service evaluates expiry during binding-detail reads and any provider refresh operation. No background scheduler is required in this spec.
+
 ### `app_keys`
 
 Represents runtime access credentials for plugin/runtime fetch.
@@ -204,14 +279,31 @@ Rules:
 - only one active `app_key` per `channel_account_id` in MVP
 - plaintext `app_key` is returned only once at creation time
 - the database stores only hash and short prefix
+- `app_key_prefix` should be the first 8 visible characters for operator troubleshooting
+- `app_key_hash` should use `SHA-256` over the full plaintext key
+- plaintext `app_key` should be generated from at least 32 random bytes and encoded as URL-safe base64 without padding, optionally with a fixed prefix such as `appk_`
+- disabling by `channel_account_id` is idempotent; if no active key exists, return `OK`
 
 ## API Design
 
 All APIs are under `/api/v1` and use only `GET` and `POST`.
 
+All success and error responses use the same envelope:
+
+```json
+{
+  "code": "OK",
+  "message": "",
+  "request_id": "req_xxx",
+  "data": {}
+}
+```
+
 ### 1. Create Binding Session
 
 `POST /api/v1/channel-bindings/create`
+
+This endpoint is synchronous for QR initialization in MVP. The handler creates the binding record, calls provider `CreateBinding` inline, persists the returned QR payload and provider reference, and returns only after the binding is ready for polling. Successful responses therefore return `status = qr_ready`, not `pending`.
 
 Request body:
 
@@ -221,6 +313,8 @@ Request body:
   "channel_type": "wechat"
 }
 ```
+
+Here `user_id` is the upstream external user identifier, not `users.id`.
 
 Response body:
 
@@ -237,6 +331,8 @@ Response body:
   }
 }
 ```
+
+If the provider cannot initialize the binding, the endpoint returns an error envelope and does not return a successful `pending` response.
 
 ### 2. Get Binding Session Detail
 
@@ -312,18 +408,43 @@ Response data:
 
 `credential_blob` is the minimal provider-specific credential package the plugin needs to start its own WeChat runtime. Internal management fields must not be returned.
 
+Example success response:
+
+```json
+{
+  "code": "OK",
+  "message": "",
+  "request_id": "req_xxx",
+  "data": {
+    "channel_type": "wechat",
+    "channel_account_id": "acct_xxx",
+    "account_uid": "wxid_xxx",
+    "credential_blob": {
+      "version": 1,
+      "payload": "base64-or-json-provider-data"
+    },
+    "runtime_options": {
+      "poll_interval_seconds": 3
+    }
+  }
+}
+```
+
 ## Binding Flow
 
 1. Caller creates a channel binding session.
-2. The application service asks the `wechat` provider to initialize a binding flow.
-3. The provider returns QR payload and provider-side binding reference.
-4. The service persists a `channel_bindings` row with `qr_ready`.
-5. The caller displays the QR code and polls binding detail.
-6. On each poll, the service may refresh provider-side state before returning the latest binding status.
-7. When login is confirmed, the service upserts `channel_accounts`, encrypts and stores credentials, links the binding session to the account, and marks the session `confirmed`.
-8. A management caller creates an `app_key` for the account.
-9. The plugin/runtime calls runtime config fetch with `X-App-Key`.
-10. The service validates the key hash, loads the channel account, decrypts credentials, and returns runtime configuration.
+2. The application service inserts a `channel_bindings` row in `pending`.
+3. The application service calls `wechat.Provider.CreateBinding` inline.
+4. The provider returns `provider_binding_ref`, QR payload, and expiry time.
+5. The service updates the binding row to `qr_ready` and returns the create response with QR payload.
+6. The caller displays the QR code and polls binding detail.
+7. On each poll, the application service calls `wechat.Provider.RefreshBinding` with `provider_binding_ref`.
+8. If provider status is still `qr_ready`, the service returns the current binding detail and may update QR payload or expiry time if the provider rotated them.
+9. If provider status is `confirmed`, the service encrypts the returned `CredentialPayload`, upserts `channel_accounts`, links the binding session to the account, and marks the session `confirmed`.
+10. If provider status is `failed` or `expired`, the service marks the binding session accordingly.
+11. A management caller creates an `app_key` for the account.
+12. The plugin/runtime calls runtime config fetch with `X-App-Key`.
+13. The service validates the key hash, loads the channel account, decrypts credentials, passes plaintext provider credentials into `BuildRuntimeConfig`, and returns runtime configuration.
 
 ## Error Handling
 
@@ -353,12 +474,14 @@ Do not overload transport-level 500 errors for expected business states such as 
 
 ## Security Requirements
 
-- Encrypt `credential_ciphertext` at rest using a service-managed master key.
+- Encrypt `credential_ciphertext` at rest using a service-managed master key loaded from environment or secret injection, for example `CHANNEL_MASTER_KEY`.
+- Use an authenticated encryption primitive such as `AES-256-GCM`.
 - Hash `app_key` before storage. Never persist plaintext keys.
 - Return plaintext `app_key` only once during creation.
 - Keep runtime config responses minimal and provider-specific.
 - Reserve an authentication middleware boundary for future upstream identity integration on management APIs.
 - Record `last_used_at` on successful runtime config access.
+- `credential_version` refers to the serialized credential payload schema version, not the master-key rotation version.
 
 ## Testing Strategy
 
