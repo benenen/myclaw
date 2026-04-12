@@ -5,19 +5,20 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	qrcode "github.com/skip2/go-qrcode"
 
 	"github.com/benenen/myclaw/internal/channel"
+	"github.com/benenen/myclaw/internal/logging"
 )
 
 type Provider struct {
 	client Client
+	logger *logging.Logger
 }
 
-func NewProvider(client Client) *Provider {
-	return &Provider{client: client}
+func NewProvider(client Client, logger *logging.Logger) *Provider {
+	return &Provider{client: client, logger: logger}
 }
 
 func (p *Provider) CreateBinding(ctx context.Context, req channel.CreateBindingRequest) (channel.CreateBindingResult, error) {
@@ -63,7 +64,7 @@ func (p *Provider) RefreshBinding(ctx context.Context, req channel.RefreshBindin
 	if err != nil {
 		return channel.RefreshBindingResult{}, fmt.Errorf("wechat refresh binding: %w", err)
 	}
-	log.Printf("wechat login_payload status=%s openid=%s credential_payload=%s", result.Status, result.OpenID, string(result.normalizedCredentialPayload()))
+	p.logger.Debug("wechat login payload", "status", result.Status, "openid", result.OpenID, "credential_payload", string(result.normalizedCredentialPayload()))
 	return channel.RefreshBindingResult{
 		ProviderStatus:    result.normalizedStatus(),
 		QRCodePayload:     result.qrPayload(),

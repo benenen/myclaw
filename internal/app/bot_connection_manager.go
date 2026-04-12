@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"errors"
-	"log"
 	"sync"
 
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/domain"
+	"github.com/benenen/myclaw/internal/logging"
 	"github.com/benenen/myclaw/internal/security"
 )
 
@@ -21,24 +21,27 @@ type BotConnectionManager struct {
 	accounts domain.ChannelAccountRepository
 	starter  channel.RuntimeStarter
 	cipher   *security.Cipher
+	logger   *logging.Logger
 }
 
-func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter) *BotConnectionManager {
+func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, logger *logging.Logger) *BotConnectionManager {
 	return &BotConnectionManager{
 		handles:  make(map[string]channel.RuntimeHandle),
 		bots:     bots,
 		accounts: accounts,
 		starter:  starter,
+		logger:   logger,
 	}
 }
 
-func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher) *BotConnectionManager {
+func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger) *BotConnectionManager {
 	return &BotConnectionManager{
 		handles:  make(map[string]channel.RuntimeHandle),
 		bots:     bots,
 		accounts: accounts,
 		starter:  starter,
 		cipher:   cipher,
+		logger:   logger,
 	}
 }
 
@@ -89,7 +92,7 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 			CredentialVersion: account.CredentialVersion,
 			Callbacks: channel.RuntimeCallbacks{
 				OnEvent: func(ev channel.RuntimeEvent) {
-					log.Printf("runtime_message bot_id=%s channel_type=%s message_id=%s from=%s text=%q", ev.BotID, ev.ChannelType, ev.MessageID, ev.From, ev.Text)
+					m.logger.Info("runtime message", "bot_id", ev.BotID, "channel_type", ev.ChannelType, "message_id", ev.MessageID, "from", ev.From, "text", ev.Text)
 				},
 				OnState: func(ev channel.RuntimeStateEvent) {
 					m.handleState(bot, ev)
@@ -154,4 +157,3 @@ func (m *BotConnectionManager) Active(botID string) bool {
 	return ok
 }
 
-var _ = log.Printf

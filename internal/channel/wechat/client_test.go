@@ -19,7 +19,7 @@ func TestHTTPClientCreateBindingSession(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	result, err := client.CreateBindingSession(context.Background(), "bind_1")
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestHTTPClientCreateBindingSessionReturnsErrorWhenBotTypeMissing(t *testing
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	result, err := client.CreateBindingSession(context.Background(), "bind_1")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestHTTPClientCreateBindingSessionNormalizesNestedAndBase64FieldsFromDataEn
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	result, err := client.CreateBindingSession(context.Background(), "bind_nested_client_1")
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestHTTPClientGetBindingSession(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	result, err := client.GetBindingSession(context.Background(), "qr_token_1")
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestHTTPClientGetMessagesLongPollParsesMessagesAndCursor(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	got, err := client.GetMessagesLongPoll(context.Background(), GetUpdatesOptions{Token: "test_token", WechatUIN: "dGVzdA==", Cursor: "cursor_prev", Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)

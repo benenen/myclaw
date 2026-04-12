@@ -42,7 +42,7 @@ func newTestBotServiceWithRuntimeStarter(t *testing.T, starter channel.RuntimeSt
 	provider := runtimeStarterOverrideProvider{FakeProvider: baseProvider, starter: starter}
 	bots := repositories.NewBotRepository(db)
 	accounts := repositories.NewChannelAccountRepository(db)
-	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, provider, cipher)
+	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, provider, cipher, nil)
 
 	return NewBotService(
 		repositories.NewUserRepository(db),
@@ -66,7 +66,7 @@ func newTestBotServiceWithProvider(t *testing.T, provider channel.Provider) *Bot
 	bots := repositories.NewBotRepository(db)
 	accounts := repositories.NewChannelAccountRepository(db)
 	starter, _ := provider.(channel.RuntimeStarter)
-	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, starter, cipher)
+	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, starter, cipher, nil)
 
 	return NewBotService(
 		repositories.NewUserRepository(db),

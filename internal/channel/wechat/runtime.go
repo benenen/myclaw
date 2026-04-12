@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/benenen/myclaw/internal/channel"
@@ -78,7 +77,7 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 					if runtimeCtx.Err() != nil {
 						return
 					}
-					log.Printf("wechat runtime poll_error bot_id=%s err=%v", req.BotID, err)
+					p.logger.Info("wechat runtime poll error", "bot_id", req.BotID, "error", err)
 					if updates.ErrCode == -14 {
 						if req.Callbacks.OnState != nil {
 							req.Callbacks.OnState(channel.RuntimeStateEvent{
@@ -93,7 +92,7 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 					time.Sleep(2 * time.Second)
 					continue
 				}
-				log.Printf("wechat runtime poll_ok bot_id=%s messages=%d cursor_len=%d next_timeout=%s", req.BotID, len(updates.Messages), len(updates.Cursor), updates.NextTimeout)
+				p.logger.Debug("wechat runtime poll ok", "bot_id", req.BotID, "messages", len(updates.Messages), "cursor_len", len(updates.Cursor), "next_timeout", updates.NextTimeout)
 				if updates.Cursor != "" {
 					cursor = updates.Cursor
 				}

@@ -19,7 +19,7 @@ func TestProviderCreateBindingUsesBotQRCodeEndpoint(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_1",
 		ChannelType: "wechat",
@@ -44,7 +44,7 @@ func TestProviderCreateBindingFallsBackToQRCodeWhenURLMissing(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_2",
 		ChannelType: "wechat",
@@ -69,7 +69,7 @@ func TestProviderCreateBindingUsesQRCodeTicketWhenQRCodeMissing(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_3",
 		ChannelType: "wechat",
@@ -97,7 +97,7 @@ func TestProviderCreateBindingUsesNestedDataQRCodePayload(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_4",
 		ChannelType: "wechat",
@@ -125,7 +125,7 @@ func TestProviderCreateBindingUsesNestedDataTicketPayload(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_5",
 		ChannelType: "wechat",
@@ -153,7 +153,7 @@ func TestProviderCreateBindingUsesBase64ImagePayload(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_6",
 		ChannelType: "wechat",
@@ -181,7 +181,7 @@ func TestProviderCreateBindingPreservesBase64QRCodeURLPayload(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_base64_url_1",
 		ChannelType: "wechat",
@@ -215,7 +215,7 @@ func TestProviderCreateBindingReturnsGeneratedQRBase64(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	result, err := provider.CreateBinding(context.Background(), channel.CreateBindingRequest{
 		BindingID:   "bind_7",
 		ChannelType: "wechat",
@@ -254,7 +254,7 @@ func TestHTTPClientCreateBindingSessionNormalizesNestedAndBase64Fields(t *testin
 	}))
 	defer ts.Close()
 
-	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL})
+	client := NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil)
 	result, err := client.CreateBindingSession(context.Background(), "bind_nested_client_1")
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +284,7 @@ func TestProviderRefreshBindingUsesQRCodeStatusEndpoint(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}))
+	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
 	_, err := provider.RefreshBinding(context.Background(), channel.RefreshBindingRequest{ProviderBindingRef: "qr_token_1"})
 	if err != nil {
 		t.Fatal(err)

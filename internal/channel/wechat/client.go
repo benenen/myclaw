@@ -8,11 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/benenen/myclaw/internal/logging"
 )
 
 type Client interface {
@@ -272,13 +273,19 @@ func randomWechatUIN() string {
 	return base64.StdEncoding.EncodeToString(buf)
 }
 
+func debugLog(logger *logging.Logger, msg string, args ...any) {
+	if logger != nil {
+		logger.Debug(msg, args...)
+	}
+}
+
 func decodeJSONResponse[T any](resp *http.Response, action string) (T, error) {
 	var zero T
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return zero, fmt.Errorf("read %s response: %w", action, err)
 	}
-	log.Printf("wechat %s response: %s", action, string(body))
+	_ = action
 	if resp.StatusCode != http.StatusOK {
 		return zero, fmt.Errorf("%s: status %d, body: %s", action, resp.StatusCode, body)
 	}
@@ -529,13 +536,15 @@ type HTTPClient struct {
 	baseURL   string
 	authToken string
 	client    *http.Client
+	logger    *logging.Logger
 }
 
-func NewHTTPClient(cfg Config) *HTTPClient {
+func NewHTTPClient(cfg Config, logger *logging.Logger) *HTTPClient {
 	return &HTTPClient{
 		baseURL:   cfg.ReferenceBaseURL,
 		authToken: cfg.AuthToken,
 		client:    &http.Client{Timeout: 30 * time.Second},
+		logger:    logger,
 	}
 }
 
@@ -576,14 +585,14 @@ func (c *HTTPClient) GetMessagesLongPoll(ctx context.Context, opts GetUpdatesOpt
 	if err != nil {
 		return GetUpdatesResult{}, fmt.Errorf("create getupdates request: %w", err)
 	}
-	log.Printf("wechat getupdates request url=%s timeout=%s cursor_len=%d", req.URL.String(), opts.Timeout, len(opts.Cursor))
+	c.logger.Debug("wechat getupdates request", "url", req.URL.String(), "timeout", opts.Timeout, "cursor_len", len(opts.Cursor))
 	req.Header.Set("Content-Type", "application/json")
 	attachAuth(req, token, opts.WechatUIN)
 
 	client := &http.Client{Timeout: opts.Timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("wechat getupdates transport_error: %v", err)
+		c.logger.Info("wechat getupdates transport error", "error", err)
 		return GetUpdatesResult{}, fmt.Errorf("getupdates request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -592,7 +601,7 @@ func (c *HTTPClient) GetMessagesLongPoll(ctx context.Context, opts GetUpdatesOpt
 	if err != nil {
 		return GetUpdatesResult{}, fmt.Errorf("read getupdates response: %w", err)
 	}
-	log.Printf("wechat getupdates response status=%d body=%s", resp.StatusCode, string(bodyBytes))
+	c.logger.Debug("wechat getupdates response", "status", resp.StatusCode, "body", string(bodyBytes))
 
 	var raw getUpdatesResponse
 	if err := json.Unmarshal(bodyBytes, &raw); err != nil {

@@ -59,7 +59,7 @@ func (c *sessionExpiredClient) GetMessagesLongPoll(context.Context, GetUpdatesOp
 }
 
 func TestStartRuntimeEmitsConnectedAndMessageEvent(t *testing.T) {
-	provider := NewProvider(&testClient{})
+	provider := NewProvider(&testClient{}, nil)
 	connected := false
 	messageText := ""
 	messageCh := make(chan struct{})
@@ -111,7 +111,7 @@ func TestStartRuntimeEmitsConnectedAndMessageEvent(t *testing.T) {
 }
 
 func TestStartRuntimeEmitsErrorOnSessionExpired(t *testing.T) {
-	provider := NewProvider(&sessionExpiredClient{})
+	provider := NewProvider(&sessionExpiredClient{}, nil)
 	stateCh := make(chan channel.RuntimeStateEvent, 2)
 
 	payload, _ := json.Marshal(map[string]any{

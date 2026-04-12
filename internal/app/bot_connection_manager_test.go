@@ -41,7 +41,7 @@ func (h *runtimeHandleStub) Done() <-chan struct{} {
 }
 
 func TestBotConnectionManagerStartMarksBotConnected(t *testing.T) {
-	manager := NewBotConnectionManager(nil, nil, &runtimeStarterStub{})
+	manager := NewBotConnectionManager(nil, nil, &runtimeStarterStub{}, nil)
 
 	if err := manager.Start(context.Background(), "bot_1"); err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -52,7 +52,7 @@ func TestBotConnectionManagerStartMarksBotConnected(t *testing.T) {
 }
 
 func TestBotConnectionManagerRejectsDuplicateStart(t *testing.T) {
-	manager := NewBotConnectionManager(nil, nil, &runtimeStarterStub{})
+	manager := NewBotConnectionManager(nil, nil, &runtimeStarterStub{}, nil)
 
 	if err := manager.Start(context.Background(), "bot_1"); err != nil {
 		t.Fatalf("expected first start to succeed, got %v", err)
@@ -67,7 +67,7 @@ func TestBotConnectionManagerPassesStoredCredentialsToRuntime(t *testing.T) {
 	starter := &capturingRuntimeStarter{}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte("cipher"), CredentialVersion: 2})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestBotConnectionManagerDetachesRuntimeFromRequestContext(t *testing.T) {
 	starter := &capturingRuntimeStarter{}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte("cipher"), CredentialVersion: 2})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestBotConnectionManagerDetachesRuntimeFromRequestContext(t *testing.T) {
 
 func TestBotConnectionManagerStartDoesNotHoldLockWhileStartingRuntime(t *testing.T) {
 	starter := &blockingRuntimeStarterStub{started: make(chan struct{}), release: make(chan struct{})}
-	manager := NewBotConnectionManager(nil, nil, starter)
+	manager := NewBotConnectionManager(nil, nil, starter, nil)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -138,7 +138,7 @@ func TestBotConnectionManagerStartDoesNotHoldLockWhileStartingRuntime(t *testing
 
 func TestBotConnectionManagerRejectsConcurrentStartWhileRuntimeStarting(t *testing.T) {
 	starter := &blockingRuntimeStarterStub{started: make(chan struct{}), release: make(chan struct{})}
-	manager := NewBotConnectionManager(nil, nil, starter)
+	manager := NewBotConnectionManager(nil, nil, starter, nil)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -171,7 +171,7 @@ func TestBotConnectionManagerRejectsConcurrentStartWhileRuntimeStarting(t *testi
 }
 
 func TestBotConnectionManagerClearsReservationWhenStartRuntimeFails(t *testing.T) {
-	manager := NewBotConnectionManager(nil, nil, &failingRuntimeStarterStub{})
+	manager := NewBotConnectionManager(nil, nil, &failingRuntimeStarterStub{}, nil)
 
 	if err := manager.Start(context.Background(), "bot_1"); err == nil {
 		t.Fatal("expected start to fail")
@@ -186,7 +186,7 @@ func TestBotConnectionManagerLogsMessageAndClearsHandleOnStop(t *testing.T) {
 	starter := &eventingRuntimeStarter{}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestBotConnectionManagerMarksBotConnectedOnConnectedState(t *testing.T) {
 	starter := &eventingRuntimeStarter{}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1", ConnectionStatus: domain.BotConnectionStatusConnecting})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestBotConnectionManagerMarksBotErrorOnErrorState(t *testing.T) {
 	starter := &eventingRuntimeStarter{emitError: true}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1", ConnectionStatus: domain.BotConnectionStatusConnecting})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -237,7 +237,7 @@ func TestBotConnectionManagerMarksBotLoginRequiredOnSessionExpired(t *testing.T)
 	starter := &eventingRuntimeStarter{emitError: true, err: fmt.Errorf("%w: getupdates failed", wechat.ErrSessionExpired)}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1", ConnectionStatus: domain.BotConnectionStatusConnecting})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
-	manager := NewBotConnectionManager(bots, accounts, starter)
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)

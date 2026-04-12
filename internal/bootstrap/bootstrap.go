@@ -10,6 +10,7 @@ import (
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
 	"github.com/benenen/myclaw/internal/domain"
+	"github.com/benenen/myclaw/internal/logging"
 	"github.com/benenen/myclaw/internal/security"
 	"github.com/benenen/myclaw/internal/store"
 	"github.com/benenen/myclaw/internal/store/repositories"
@@ -21,6 +22,8 @@ type App struct {
 }
 
 func New(cfg config.Config) (*App, error) {
+	logger := logging.New(cfg.LogLevel)
+
 	// Database
 	db, err := store.Open(cfg.SQLitePath)
 	if err != nil {
@@ -44,11 +47,11 @@ func New(cfg config.Config) (*App, error) {
 
 	// Provider
 	wechatCfg := wechat.LoadConfig()
-	wechatClient := wechat.NewHTTPClient(wechatCfg)
-	provider := wechat.NewProvider(wechatClient)
+	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
+	provider := wechat.NewProvider(wechatClient, logger)
 
 	// Application services
-	botManager := app.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher)
+	botManager := app.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, logger)
 	botSvc := app.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, cipher, provider, botManager)
 
 	// HTTP
