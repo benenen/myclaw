@@ -15,6 +15,16 @@ import (
 type Client interface {
 	CreateBindingSession(ctx context.Context, bindingID string) (CreateSessionResult, error)
 	GetBindingSession(ctx context.Context, providerRef string) (GetSessionResult, error)
+	GetMessages(ctx context.Context, lastMsgID string) ([]Message, error)
+}
+
+type Message struct {
+	MsgID   string
+	MsgType string
+	From    string
+	Text    string
+	Raw     []byte
+	Created int64
 }
 
 type CreateSessionResult struct {
@@ -466,4 +476,8 @@ func (c *HTTPClient) GetBindingSession(ctx context.Context, providerRef string) 
 		return GetSessionResult{}, err
 	}
 	return executeGetBindingSession(c.client, req)
+}
+
+func (c *HTTPClient) GetMessages(ctx context.Context, lastMsgID string) ([]Message, error) {
+	return []Message{}, nil
 }

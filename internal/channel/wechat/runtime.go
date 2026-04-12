@@ -43,35 +43,56 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 	go func() {
 		defer close(handle.done)
 
-		select {
-		case <-runtimeCtx.Done():
-			if req.Callbacks.OnState != nil {
-				req.Callbacks.OnState(channel.RuntimeStateEvent{
-					BotID:       req.BotID,
-					ChannelType: req.ChannelType,
-					State:       channel.RuntimeStateStopped,
-					Reason:      runtimeCtx.Err().Error(),
-				})
+		ticker := time.NewTicker(time.Duration(3) * time.Second)
+		defer ticker.Stop()
+
+		lastMsgID := ""
+
+		// Poll immediately once
+		pollMessages := func() {
+			messages, err := p.client.GetMessages(runtimeCtx, lastMsgID)
+			if err != nil {
+				if req.Callbacks.OnState != nil {
+					req.Callbacks.OnState(channel.RuntimeStateEvent{
+						BotID:       req.BotID,
+						ChannelType: req.ChannelType,
+						State:       channel.RuntimeStateError,
+						Err:         err,
+					})
+				}
+				return
 			}
-		case <-time.After(10 * time.Millisecond):
-			if req.Callbacks.OnEvent != nil {
-				req.Callbacks.OnEvent(channel.RuntimeEvent{
-					BotID:       req.BotID,
-					ChannelType: req.ChannelType,
-					MessageID:   "msg_fake_1",
-					From:        req.AccountUID,
-					Text:        "fake inbound wechat message",
-					Raw:         req.CredentialPayload,
-				})
+			for _, msg := range messages {
+				if req.Callbacks.OnEvent != nil {
+					req.Callbacks.OnEvent(channel.RuntimeEvent{
+						BotID:       req.BotID,
+						ChannelType: req.ChannelType,
+						MessageID:   msg.MsgID,
+						From:        msg.From,
+						Text:        msg.Text,
+						Raw:         msg.Raw,
+					})
+				}
+				lastMsgID = msg.MsgID
 			}
-			<-runtimeCtx.Done()
-			if req.Callbacks.OnState != nil {
-				req.Callbacks.OnState(channel.RuntimeStateEvent{
-					BotID:       req.BotID,
-					ChannelType: req.ChannelType,
-					State:       channel.RuntimeStateStopped,
-					Reason:      runtimeCtx.Err().Error(),
-				})
+		}
+
+		pollMessages()
+
+		for {
+			select {
+			case <-runtimeCtx.Done():
+				if req.Callbacks.OnState != nil {
+					req.Callbacks.OnState(channel.RuntimeStateEvent{
+						BotID:       req.BotID,
+						ChannelType: req.ChannelType,
+						State:       channel.RuntimeStateStopped,
+						Reason:      runtimeCtx.Err().Error(),
+					})
+				}
+				return
+			case <-ticker.C:
+				pollMessages()
 			}
 		}
 	}()

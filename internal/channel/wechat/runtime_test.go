@@ -9,8 +9,24 @@ import (
 	"github.com/benenen/myclaw/internal/channel"
 )
 
+type testClient struct{}
+
+func (c *testClient) CreateBindingSession(context.Context, string) (CreateSessionResult, error) {
+	return CreateSessionResult{}, nil
+}
+
+func (c *testClient) GetBindingSession(context.Context, string) (GetSessionResult, error) {
+	return GetSessionResult{}, nil
+}
+
+func (c *testClient) GetMessages(context.Context, string) ([]Message, error) {
+	return []Message{
+		{MsgID: "msg_test_1", From: "wxid_1", Text: "hello from test"},
+	}, nil
+}
+
 func TestStartRuntimeEmitsConnectedAndMessageEvent(t *testing.T) {
-	provider := NewProvider(nil)
+	provider := NewProvider(&testClient{})
 	connected := false
 	messageText := ""
 	messageCh := make(chan struct{})

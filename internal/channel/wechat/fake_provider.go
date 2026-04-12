@@ -118,6 +118,18 @@ func (p *FakeProvider) RuntimeStarted(botID string) bool {
 	return p.runtimeStarted[botID]
 }
 
+func (p *FakeProvider) GetMessages(_ context.Context, _ string) ([]Message, error) {
+	return []Message{
+		{
+			MsgID:   "msg_fake_1",
+			MsgType: "text",
+			From:    "wxid_fake",
+			Text:    "fake inbound message",
+			Created: time.Now().Unix(),
+		},
+	}, nil
+}
+
 type fakeRuntimeHandle struct {
 	done chan struct{}
 	once sync.Once
