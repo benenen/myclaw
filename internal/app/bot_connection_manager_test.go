@@ -247,6 +247,10 @@ func (r *botRepoStub) Update(_ context.Context, bot domain.Bot) (domain.Bot, err
 	return bot, nil
 }
 
+func (r *botRepoStub) DeleteByID(context.Context, string) error {
+	panic("unexpected call")
+}
+
 var _ domain.BotRepository = (*botRepoStub)(nil)
 
 type accountRepoStub struct {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/domain"
+	"github.com/benenen/myclaw/internal/security"
 )
 
 var ErrRuntimeAlreadyStarted = errors.New("runtime already started")
@@ -18,6 +19,7 @@ type BotConnectionManager struct {
 	bots     domain.BotRepository
 	accounts domain.ChannelAccountRepository
 	starter  channel.RuntimeStarter
+	cipher   *security.Cipher
 }
 
 func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter) *BotConnectionManager {
@@ -29,6 +31,16 @@ func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelA
 	}
 }
 
+func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher) *BotConnectionManager {
+	return &BotConnectionManager{
+		handles:  make(map[string]channel.RuntimeHandle),
+		bots:     bots,
+		accounts: accounts,
+		starter:  starter,
+		cipher:   cipher,
+	}
+}
+
 func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 	m.mu.Lock()
 	if _, exists := m.handles[botID]; exists {
@@ -37,7 +49,7 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 	}
 	m.mu.Unlock()
 
-	req := channel.StartRuntimeRequest{BotID: botID}
+req := channel.StartRuntimeRequest{BotID: botID}
 	if m.bots != nil && m.accounts != nil {
 		bot, err := m.bots.GetByID(ctx, botID)
 		if err != nil {
@@ -47,11 +59,19 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 		if err != nil {
 			return err
 		}
+		credentialPayload := account.CredentialCiphertext
+		if m.cipher != nil {
+			decrypted, err := m.cipher.Decrypt(account.CredentialCiphertext)
+			if err != nil {
+				return err
+			}
+			credentialPayload = decrypted
+		}
 		req = channel.StartRuntimeRequest{
 			BotID:             bot.ID,
 			ChannelType:       bot.ChannelType,
 			AccountUID:        account.AccountUID,
-			CredentialPayload: account.CredentialCiphertext,
+			CredentialPayload: credentialPayload,
 			CredentialVersion: account.CredentialVersion,
 			Callbacks: channel.RuntimeCallbacks{
 				OnEvent: func(ev channel.RuntimeEvent) {

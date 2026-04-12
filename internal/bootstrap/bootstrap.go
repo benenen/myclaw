@@ -48,7 +48,7 @@ func New(cfg config.Config) (*App, error) {
 	provider := wechat.NewProvider(wechatClient)
 
 	// Application services
-	botManager := app.NewBotConnectionManager(botRepo, accountRepo, provider)
+	botManager := app.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher)
 	botSvc := app.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, cipher, provider, botManager)
 
 	// HTTP
