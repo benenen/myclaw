@@ -69,3 +69,29 @@ func TestBotRepositoryUpdateConnectionState(t *testing.T) {
 		t.Fatalf("unexpected connection status: %s", got.ConnectionStatus)
 	}
 }
+
+func TestBotRepositoryDeleteByID(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, domain.Bot{
+		ID:               "bot_3",
+		UserID:           "usr_1",
+		Name:             "cleanup-bot",
+		ChannelType:      "wechat",
+		ConnectionStatus: domain.BotConnectionStatusLoginRequired,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteByID(ctx, "bot_3"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = repo.GetByID(ctx, "bot_3")
+	if err != domain.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

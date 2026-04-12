@@ -19,5 +19,6 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 	mux.Handle("POST /api/v1/bots/create", wrap(CreateBot(deps.BotService)))
 	mux.Handle("GET /api/v1/bots/list", wrap(ListBots(deps.BotService)))
 	mux.Handle("POST /api/v1/bots/connect", wrap(ConnectBot(deps.BotService)))
+	mux.Handle("POST /api/v1/bots/delete", wrap(DeleteBot(deps.BotService)))
 	mux.Handle("GET /api/v1/bots/connect", wrap(RefreshBotLogin(deps.BotService)))
 }

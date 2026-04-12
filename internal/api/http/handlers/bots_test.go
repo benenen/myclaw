@@ -135,3 +135,41 @@ func TestRefreshBotLoginHandlerReturnsNotFoundForMissingBinding(t *testing.T) {
 	rr := testutil.GetJSON(t, ts, "/api/v1/bots/connect?binding_id=bind_missing")
 	testutil.AssertJSONCode(t, rr, "NOT_FOUND")
 }
+
+func TestDeleteBotHandlerReturnsEnvelope(t *testing.T) {
+	ts := newTestServer(t)
+	create := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_123","name":"sales-bot","channel_type":"wechat"}`)
+	var env httpapi.Envelope
+	if err := json.Unmarshal(create.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data type: %T", env.Data)
+	}
+	botID, ok := payload["bot_id"].(string)
+	if !ok || botID == "" {
+		t.Fatalf("unexpected bot id payload: %#v", payload["bot_id"])
+	}
+
+	rr := testutil.PostJSON(t, ts, "/api/v1/bots/delete", `{"bot_id":"`+botID+`"}`)
+	testutil.AssertJSONCode(t, rr, "OK")
+
+	list := testutil.GetJSON(t, ts, "/api/v1/bots/list?user_id=u_123")
+	if err := json.Unmarshal(list.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	items, ok := env.Data.([]any)
+	if !ok {
+		t.Fatalf("unexpected list data type: %T", env.Data)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected 0 bots, got %d", len(items))
+	}
+}
+
+func TestDeleteBotHandlerRejectsEmptyBody(t *testing.T) {
+	ts := newTestServer(t)
+	rr := testutil.PostJSON(t, ts, "/api/v1/bots/delete", `{}`)
+	testutil.AssertJSONCode(t, rr, "INVALID_ARGUMENT")
+}

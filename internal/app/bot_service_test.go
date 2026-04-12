@@ -195,6 +195,43 @@ func TestBotServiceListBotsRejectsEmptyUser(t *testing.T) {
 	}
 }
 
+func TestBotServiceDeleteBotRemovesBotAndBindings(t *testing.T) {
+	svc := newTestBotService(t)
+	bot, err := svc.CreateBot(context.Background(), CreateBotInput{
+		ExternalUserID: "u_123",
+		Name:           "sales-bot",
+		ChannelType:    "wechat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := svc.StartLogin(context.Background(), StartBotLoginInput{BotID: bot.BotID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.DeleteBot(context.Background(), bot.BotID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.bots.GetByID(context.Background(), bot.BotID)
+	if err != domain.ErrNotFound {
+		t.Fatalf("expected bot to be deleted, got %v", err)
+	}
+	_, err = svc.bindings.GetByID(context.Background(), started.BindingID)
+	if err != domain.ErrNotFound {
+		t.Fatalf("expected bindings to be deleted, got %v", err)
+	}
+}
+
+func TestBotServiceDeleteBotRejectsEmptyID(t *testing.T) {
+	svc := newTestBotService(t)
+	err := svc.DeleteBot(context.Background(), "")
+	if err != domain.ErrInvalidArg {
+		t.Fatalf("expected ErrInvalidArg, got %v", err)
+	}
+}
+
 func TestBotServiceStartLogin(t *testing.T) {
 	svc := newTestBotService(t)
 	bot, err := svc.CreateBot(context.Background(), CreateBotInput{

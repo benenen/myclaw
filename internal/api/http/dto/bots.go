@@ -26,6 +26,10 @@ type ConnectBotRequest struct {
 	BotID string `json:"bot_id"`
 }
 
+type DeleteBotRequest struct {
+	BotID string `json:"bot_id"`
+}
+
 type ConnectBotResponse struct {
 	BotID         string `json:"bot_id"`
 	BindingID     string `json:"binding_id"`

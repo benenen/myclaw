@@ -73,6 +73,10 @@ func (r *ChannelBindingRepository) Update(ctx context.Context, binding domain.Ch
 	return toDomainChannelBinding(m), nil
 }
 
+func (r *ChannelBindingRepository) DeleteByBotID(ctx context.Context, botID string) error {
+	return r.db.WithContext(ctx).Where("bot_id = ?", botID).Delete(&models.ChannelBinding{}).Error
+}
+
 func toDomainChannelBinding(m models.ChannelBinding) domain.ChannelBinding {
 	return domain.ChannelBinding{
 		ID:                 m.ID,

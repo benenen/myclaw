@@ -33,7 +33,7 @@ func TestHandlerServesRuntimeConsoleBranding(t *testing.T) {
 	if strings.Contains(body, "Channel Plugin") {
 		t.Fatalf("response still contains old product name: %q", body)
 	}
-	for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "qr-modal", "showQRModal(result.qr_code_payload, result.qr_share_url, result.status)", "copyShareURL()", "qr-share-link", "document.getElementById('connect-result').innerHTML = ''", "id=\"qr-status-text\"", "image.src = payload"} {
+	for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "qr-modal", "showQRModal(result.qr_code_payload, result.qr_share_url, result.status)", "copyShareURL()", "qr-share-link", "document.getElementById('connect-result').innerHTML = ''", "id=\"qr-status-text\"", "image.src = payload", "deleteBot(", "Delete bot"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("response does not contain %q: %q", want, body)
 		}

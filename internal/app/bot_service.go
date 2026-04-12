@@ -81,6 +81,19 @@ type StartBotLoginInput struct {
 	BotID string
 }
 
+func (s *BotService) DeleteBot(ctx context.Context, botID string) error {
+	if botID == "" {
+		return domain.ErrInvalidArg
+	}
+	if _, err := s.bots.GetByID(ctx, botID); err != nil {
+		return err
+	}
+	if err := s.bindings.DeleteByBotID(ctx, botID); err != nil {
+		return err
+	}
+	return s.bots.DeleteByID(ctx, botID)
+}
+
 type BotListItem struct {
 	BotID            string
 	Name             string

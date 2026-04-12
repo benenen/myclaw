@@ -249,10 +249,27 @@ button:hover { transform: translateY(-1px); }
   box-shadow: inset 0 0 0 1px #dbeafe;
 }
 .bot-item strong {
-  display: block;
   font-size: 14px;
   font-weight: 650;
+}
+.bot-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 6px;
+}
+.bot-delete {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: var(--danger);
+  border-color: transparent;
+  background: #fff1f2;
+  flex: none;
+}
+.bot-delete:hover {
+  border-color: #fecdd3;
 }
 .bot-meta {
   display: flex;
@@ -643,7 +660,18 @@ function renderBotList() {
   empty.style.display = 'none';
   list.innerHTML = bots.map(bot => `
     <div class="bot-item ${bot.bot_id === selectedBotId ? 'active' : ''}" onclick="selectBot('${bot.bot_id}')">
-      <strong>${escapeHtml(bot.name)}</strong>
+      <div class="bot-head">
+        <strong>${escapeHtml(bot.name)}</strong>
+        <button class="icon-btn bot-delete" type="button" title="Delete bot" aria-label="Delete bot" onclick="event.stopPropagation(); deleteBot('${bot.bot_id}', '${escapeJs(bot.name)}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18"/>
+            <path d="M8 6V4h8v2"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+          </svg>
+        </button>
+      </div>
       <div class="bot-meta">
         <span>${escapeHtml(bot.channel_type)}</span>
         <span>${statusBadge(bot.connection_status)}</span>
@@ -758,6 +786,24 @@ async function connectSelectedBot() {
   startLoginPolling(result.binding_id);
 }
 
+async function deleteBot(botID, botName) {
+  const name = botName || botID;
+  if (!confirm(`Delete bot "${name}"?`)) {
+    return;
+  }
+  if (botID === selectedBotId) {
+    stopLoginPolling();
+    closeQRModal();
+  }
+  const data = await api('POST', '/bots/delete', { bot_id: botID });
+  if (data.code !== 'OK') {
+    toast(data.message || data.code);
+    return;
+  }
+  toast('bot deleted');
+  await loadBots();
+}
+
 async function copyShareURL() {
   const link = document.getElementById('qr-share-link').href;
   if (!link) {
@@ -797,6 +843,7 @@ window.copyShareURL = copyShareURL;
 window.loadBots = loadBots;
 window.selectBot = selectBot;
 window.createBot = createBot;
+window.deleteBot = deleteBot;
 window.closeQRModal = closeQRModal;
 
 function escapeHtml(value) {
@@ -806,6 +853,12 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function escapeJs(value) {
+  return String(value ?? '')
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "\\'");
 }
 
 loadBots();

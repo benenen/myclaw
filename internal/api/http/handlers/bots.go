@@ -116,6 +116,38 @@ func ConnectBot(svc *app.BotService) stdhttp.HandlerFunc {
 	}
 }
 
+func DeleteBot(svc *app.BotService) stdhttp.HandlerFunc {
+	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		var req dto.DeleteBotRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "invalid request body")
+			return
+		}
+		if req.BotID == "" {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "bot_id is required")
+			return
+		}
+
+		err := svc.DeleteBot(r.Context(), req.BotID)
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidArg) {
+				httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
+				return
+			}
+			if errors.Is(err, domain.ErrNotFound) {
+				httpapi.WriteError(w, r, "NOT_FOUND", err.Error())
+				return
+			}
+			httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
+			return
+		}
+
+		httpapi.WriteOKFromRequest(w, r, map[string]string{
+			"bot_id": req.BotID,
+		})
+	}
+}
+
 func RefreshBotLogin(svc *app.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		bindingID := r.URL.Query().Get("binding_id")

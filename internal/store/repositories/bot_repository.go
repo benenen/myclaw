@@ -79,6 +79,17 @@ func (r *BotRepository) Update(ctx context.Context, bot domain.Bot) (domain.Bot,
 	return toDomainBot(m), nil
 }
 
+func (r *BotRepository) DeleteByID(ctx context.Context, id string) error {
+	result := r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.Bot{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func toDomainBot(m models.Bot) domain.Bot {
 	return domain.Bot{
 		ID:               m.ID,
