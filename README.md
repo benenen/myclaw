@@ -57,25 +57,9 @@ curl http://localhost:8080/api/v1/channel-bindings/detail?binding_id=bind_xxx
 curl http://localhost:8080/api/v1/channel-accounts/list?user_id=u_123&channel_type=wechat
 ```
 
-### Create App Key
-
-```bash
-curl -X POST http://localhost:8080/api/v1/channel-accounts/app-key/create \
-  -H "Content-Type: application/json" \
-  -d '{"channel_account_id":"acct_xxx"}'
-```
-
-### Disable App Key
-
-```bash
-curl -X POST http://localhost:8080/api/v1/channel-accounts/app-key/disable \
-  -H "Content-Type: application/json" \
-  -d '{"channel_account_id":"acct_xxx"}'
-```
-
 ### Fetch Runtime Configuration
 
 ```bash
 curl http://localhost:8080/api/v1/runtime/config \
-  -H "X-App-Key: appk_xxx"
+  -H "Authorization: Bearer <token>"
 ```

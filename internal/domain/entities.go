@@ -52,15 +52,3 @@ type Bot struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
-
-type AppKey struct {
-	ID               string
-	UserID           string
-	ChannelAccountID string
-	AppKeyHash       string
-	AppKeyPrefix     string
-	Status           string
-	LastUsedAt       *time.Time
-	CreatedAt        time.Time
-	DisabledAt       *time.Time
-}

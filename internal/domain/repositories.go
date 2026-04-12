@@ -24,13 +24,3 @@ type BotRepository interface {
 	ListByUserID(ctx context.Context, userID string) ([]Bot, error)
 	Update(ctx context.Context, bot Bot) (Bot, error)
 }
-
-type AppKeyRepository interface {
-	Create(ctx context.Context, key AppKey) (AppKey, error)
-	FindByHash(ctx context.Context, hash string) (AppKey, error)
-	FindActiveByChannelAccountID(ctx context.Context, channelAccountID string) (AppKey, error)
-	DisableByID(ctx context.Context, id string) error
-	DisableByChannelAccountID(ctx context.Context, channelAccountID string) error
-	UpdateLastUsedAt(ctx context.Context, id string) error
-	HasActiveByChannelAccountID(ctx context.Context, channelAccountID string) (bool, error)
-}
