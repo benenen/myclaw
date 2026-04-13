@@ -47,12 +47,26 @@ type BuildRuntimeConfigRequest struct {
 
 type RuntimeConfig map[string]any
 
+type ReplyTarget struct {
+	ChannelType string
+	RecipientID string
+	Metadata    map[string]string
+}
+
+func (t ReplyTarget) MetadataValue(key string) string {
+	if t.Metadata == nil {
+		return ""
+	}
+	return t.Metadata[key]
+}
+
 type RuntimeEvent struct {
 	BotID       string
 	ChannelType string
 	MessageID   string
 	From        string
 	Text        string
+	ReplyTarget ReplyTarget
 	Raw         []byte
 }
 

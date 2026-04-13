@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
-	"github.com/benenen/myclaw/internal/app"
+	"github.com/benenen/myclaw/internal/app/bot"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/security"
 	"github.com/benenen/myclaw/internal/store/repositories"
@@ -34,17 +34,74 @@ func newTestServerWithProvider(t *testing.T) (*wechat.FakeProvider, stdhttp.Hand
 	botRepo := repositories.NewBotRepository(db)
 	mux := stdhttp.NewServeMux()
 	RegisterRoutes(mux, Dependencies{
-		BotService: app.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, cipher, provider, app.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, nil)),
+		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, nil)),
 	})
 	return provider, mux
 }
 
 func TestCreateBotHandlerReturnsEnvelope(t *testing.T) {
 	ts := newTestServer(t)
-	rr := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_123","name":"sales-bot","channel_type":"wechat"}`)
+	rr := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_123","name":"sales-bot","channel_type":"wechat","agent_capability_id":"cap_claude","agent_mode":"session"}`)
 	if rr.Code != stdhttp.StatusOK {
 		t.Fatalf("unexpected status: %d", rr.Code)
 	}
+	var env httpapi.Envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Code != "OK" {
+		t.Fatalf("unexpected code: %s", env.Code)
+	}
+	payload, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data type: %T", env.Data)
+	}
+	if payload["agent_capability_id"] != "cap_claude" {
+		t.Fatalf("unexpected capability: %#v", payload["agent_capability_id"])
+	}
+	if payload["agent_mode"] != "session" {
+		t.Fatalf("unexpected mode: %#v", payload["agent_mode"])
+	}
+}
+
+func TestConfigureBotAgentHandlerReturnsEnvelope(t *testing.T) {
+	ts := newTestServer(t)
+	create := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_123","name":"sales-bot","channel_type":"wechat"}`)
+	var env httpapi.Envelope
+	if err := json.Unmarshal(create.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data type: %T", env.Data)
+	}
+	botID, ok := payload["bot_id"].(string)
+	if !ok || botID == "" {
+		t.Fatalf("unexpected bot id payload: %#v", payload["bot_id"])
+	}
+
+	rr := testutil.PostJSON(t, ts, "/api/v1/bots/agent", `{"bot_id":"`+botID+`","agent_capability_id":"cap_codex","agent_mode":"oneshot"}`)
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Code != "OK" {
+		t.Fatalf("unexpected code: %s", env.Code)
+	}
+	payload, ok = env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data type: %T", env.Data)
+	}
+	if payload["agent_capability_id"] != "cap_codex" {
+		t.Fatalf("unexpected capability: %#v", payload["agent_capability_id"])
+	}
+	if payload["agent_mode"] != "oneshot" {
+		t.Fatalf("unexpected mode: %#v", payload["agent_mode"])
+	}
+}
+
+func TestListAgentCapabilitiesHandlerReturnsEnvelope(t *testing.T) {
+	ts := newTestServer(t)
+	rr := testutil.GetJSON(t, ts, "/api/v1/agent-capabilities")
 	testutil.AssertJSONCode(t, rr, "OK")
 }
 

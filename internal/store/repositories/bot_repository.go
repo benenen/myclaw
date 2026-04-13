@@ -20,16 +20,18 @@ func NewBotRepository(db *gorm.DB) *BotRepository {
 func (r *BotRepository) Create(ctx context.Context, bot domain.Bot) (domain.Bot, error) {
 	now := time.Now().UTC()
 	m := models.Bot{
-		ID:               bot.ID,
-		UserID:           bot.UserID,
-		Name:             bot.Name,
-		ChannelType:      bot.ChannelType,
-		ChannelAccountID: bot.ChannelAccountID,
-		ConnectionStatus: bot.ConnectionStatus,
-		ConnectionError:  bot.ConnectionError,
-		LastConnectedAt:  bot.LastConnectedAt,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                bot.ID,
+		UserID:            bot.UserID,
+		Name:              bot.Name,
+		ChannelType:       bot.ChannelType,
+		ChannelAccountID:  bot.ChannelAccountID,
+		ConnectionStatus:  bot.ConnectionStatus,
+		ConnectionError:   bot.ConnectionError,
+		AgentCapabilityID: bot.AgentCapabilityID,
+		AgentMode:         bot.AgentMode,
+		LastConnectedAt:   bot.LastConnectedAt,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
 		return domain.Bot{}, err
@@ -74,16 +76,18 @@ func (r *BotRepository) ListWithAccounts(ctx context.Context) ([]domain.Bot, err
 
 func (r *BotRepository) Update(ctx context.Context, bot domain.Bot) (domain.Bot, error) {
 	m := models.Bot{
-		ID:               bot.ID,
-		UserID:           bot.UserID,
-		Name:             bot.Name,
-		ChannelType:      bot.ChannelType,
-		ChannelAccountID: bot.ChannelAccountID,
-		ConnectionStatus: bot.ConnectionStatus,
-		ConnectionError:  bot.ConnectionError,
-		LastConnectedAt:  bot.LastConnectedAt,
-		CreatedAt:        bot.CreatedAt,
-		UpdatedAt:        time.Now().UTC(),
+		ID:                bot.ID,
+		UserID:            bot.UserID,
+		Name:              bot.Name,
+		ChannelType:       bot.ChannelType,
+		ChannelAccountID:  bot.ChannelAccountID,
+		ConnectionStatus:  bot.ConnectionStatus,
+		ConnectionError:   bot.ConnectionError,
+		AgentCapabilityID: bot.AgentCapabilityID,
+		AgentMode:         bot.AgentMode,
+		LastConnectedAt:   bot.LastConnectedAt,
+		CreatedAt:         bot.CreatedAt,
+		UpdatedAt:         time.Now().UTC(),
 	}
 	if err := r.db.WithContext(ctx).Save(&m).Error; err != nil {
 		return domain.Bot{}, err
@@ -104,15 +108,17 @@ func (r *BotRepository) DeleteByID(ctx context.Context, id string) error {
 
 func toDomainBot(m models.Bot) domain.Bot {
 	return domain.Bot{
-		ID:               m.ID,
-		UserID:           m.UserID,
-		Name:             m.Name,
-		ChannelType:      m.ChannelType,
-		ChannelAccountID: m.ChannelAccountID,
-		ConnectionStatus: m.ConnectionStatus,
-		ConnectionError:  m.ConnectionError,
-		LastConnectedAt:  m.LastConnectedAt,
-		CreatedAt:        m.CreatedAt,
-		UpdatedAt:        m.UpdatedAt,
+		ID:                m.ID,
+		UserID:            m.UserID,
+		Name:              m.Name,
+		ChannelType:       m.ChannelType,
+		ChannelAccountID:  m.ChannelAccountID,
+		ConnectionStatus:  m.ConnectionStatus,
+		ConnectionError:   m.ConnectionError,
+		AgentCapabilityID: m.AgentCapabilityID,
+		AgentMode:         m.AgentMode,
+		LastConnectedAt:   m.LastConnectedAt,
+		CreatedAt:         m.CreatedAt,
+		UpdatedAt:         m.UpdatedAt,
 	}
 }

@@ -1,4 +1,4 @@
-package app
+package bot
 
 import (
 	"context"
@@ -20,8 +20,8 @@ func (s *runtimeStarterStub) StartRuntime(_ context.Context, _ channel.StartRunt
 }
 
 type runtimeHandleStub struct {
-	done    chan struct{}
-	stopFn  func()
+	done     chan struct{}
+	stopFn   func()
 	stopOnce bool
 }
 
@@ -96,6 +96,46 @@ func TestBotConnectionManagerDetachesRuntimeFromRequestContext(t *testing.T) {
 	select {
 	case <-starter.ctx.Done():
 		t.Fatal("expected runtime context to survive request cancellation")
+	default:
+	}
+}
+
+func TestBotConnectionManagerPreservesContextValuesWhenDetachingCancellation(t *testing.T) {
+	type ctxKey string
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxKey("request_id"), "req-123"))
+	defer cancel()
+	starter := &capturingRuntimeStarter{}
+	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
+	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte("cipher"), CredentialVersion: 2})
+	manager := NewBotConnectionManager(bots, accounts, starter, nil)
+
+	if err := manager.Start(ctx, "bot_1"); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if got := starter.ctx.Value(ctxKey("request_id")); got != "req-123" {
+		t.Fatalf("unexpected preserved context value: %#v", got)
+	}
+	select {
+	case <-starter.ctx.Done():
+		t.Fatal("expected runtime context to remain detached from cancellation")
+	default:
+	}
+}
+
+func TestBotConnectionManagerUsesBackgroundContextWhenInputIsNil(t *testing.T) {
+	starter := &capturingRuntimeStarter{}
+	manager := NewBotConnectionManager(nil, nil, starter, nil)
+
+	if err := manager.Start(nil, "bot_1"); err != nil {
+		t.Fatal(err)
+	}
+	if starter.ctx == nil {
+		t.Fatal("expected runtime context")
+	}
+	select {
+	case <-starter.ctx.Done():
+		t.Fatal("expected background runtime context")
 	default:
 	}
 }
@@ -198,6 +238,46 @@ func TestBotConnectionManagerLogsMessageAndClearsHandleOnStop(t *testing.T) {
 	if manager.Active("bot_1") {
 		t.Fatal("expected runtime handle to be cleared")
 	}
+}
+
+func TestBotConnectionManagerForwardsRuntimeEvent(t *testing.T) {
+	ctx := context.Background()
+	starter := &capturingRuntimeStarter{}
+	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
+	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
+	var got channel.RuntimeEvent
+	manager := NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, nil, func(ev channel.RuntimeEvent) {
+		got = ev
+	})
+
+	if err := manager.Start(ctx, "bot_1"); err != nil {
+		t.Fatal(err)
+	}
+	if starter.req.Callbacks.OnEvent == nil {
+		t.Fatal("expected runtime event callback")
+	}
+
+	expected := channel.RuntimeEvent{BotID: "bot_1", ChannelType: "wechat", MessageID: "msg_1", From: "wxid_sender", Text: "hello", ReplyTarget: channel.ReplyTarget{ChannelType: "wechat", RecipientID: "wxid_sender", Metadata: map[string]string{"token": "token-1"}}}
+	starter.req.Callbacks.OnEvent(expected)
+	if got.MessageID != expected.MessageID || got.ReplyTarget.RecipientID != expected.ReplyTarget.RecipientID || got.ReplyTarget.MetadataValue("token") != "token-1" {
+		t.Fatalf("forwarded event = %#v", got)
+	}
+}
+
+func TestBotConnectionManagerWithoutEventHandlerStillStarts(t *testing.T) {
+	ctx := context.Background()
+	starter := &capturingRuntimeStarter{}
+	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
+	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
+	manager := NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, nil, nil)
+
+	if err := manager.Start(ctx, "bot_1"); err != nil {
+		t.Fatal(err)
+	}
+	if starter.req.Callbacks.OnEvent == nil {
+		t.Fatal("expected runtime event logger callback")
+	}
+	starter.req.Callbacks.OnEvent(channel.RuntimeEvent{BotID: "bot_1", MessageID: "msg_1", From: "wxid_sender", Text: "hello"})
 }
 
 func TestBotConnectionManagerMarksBotConnectedOnConnectedState(t *testing.T) {
@@ -323,44 +403,6 @@ func (s *eventingRuntimeStarter) StopLast() {
 		s.lastHandle.Stop()
 	}
 }
-
-type botRepoStub struct {
-	bot domain.Bot
-}
-
-func newBotRepoStub(bot domain.Bot) *botRepoStub {
-	return &botRepoStub{bot: bot}
-}
-
-func (r *botRepoStub) Create(context.Context, domain.Bot) (domain.Bot, error) {
-	panic("unexpected call")
-}
-
-func (r *botRepoStub) GetByID(_ context.Context, id string) (domain.Bot, error) {
-	if r.bot.ID != id {
-		return domain.Bot{}, domain.ErrNotFound
-	}
-	return r.bot, nil
-}
-
-func (r *botRepoStub) ListByUserID(context.Context, string) ([]domain.Bot, error) {
-	panic("unexpected call")
-}
-
-func (r *botRepoStub) ListWithAccounts(context.Context) ([]domain.Bot, error) {
-	panic("unexpected call")
-}
-
-func (r *botRepoStub) Update(_ context.Context, bot domain.Bot) (domain.Bot, error) {
-	r.bot = bot
-	return bot, nil
-}
-
-func (r *botRepoStub) DeleteByID(context.Context, string) error {
-	panic("unexpected call")
-}
-
-var _ domain.BotRepository = (*botRepoStub)(nil)
 
 type accountRepoStub struct {
 	account domain.ChannelAccount

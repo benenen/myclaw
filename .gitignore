@@ -34,3 +34,5 @@ go.work.sum
 channel.db
 
 /tmp
+
+__debug_bin*

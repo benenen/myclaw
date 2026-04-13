@@ -1,4 +1,4 @@
-package app
+package bot
 
 import (
 	"context"
@@ -10,13 +10,14 @@ import (
 )
 
 type BotService struct {
-	users    domain.UserRepository
-	bots     domain.BotRepository
-	bindings domain.ChannelBindingRepository
-	accounts domain.ChannelAccountRepository
-	cipher   *security.Cipher
-	provider channel.Provider
-	runtimes *BotConnectionManager
+	users        domain.UserRepository
+	bots         domain.BotRepository
+	bindings     domain.ChannelBindingRepository
+	accounts     domain.ChannelAccountRepository
+	capabilities domain.AgentCapabilityRepository
+	cipher       *security.Cipher
+	provider     channel.Provider
+	runtimes     *BotConnectionManager
 }
 
 func NewBotService(
@@ -24,33 +25,39 @@ func NewBotService(
 	bots domain.BotRepository,
 	bindings domain.ChannelBindingRepository,
 	accounts domain.ChannelAccountRepository,
+	capabilities domain.AgentCapabilityRepository,
 	cipher *security.Cipher,
 	provider channel.Provider,
 	runtimes *BotConnectionManager,
 ) *BotService {
 	return &BotService{
-		users:    users,
-		bots:     bots,
-		bindings: bindings,
-		accounts: accounts,
-		cipher:   cipher,
-		provider: provider,
-		runtimes: runtimes,
+		users:        users,
+		bots:         bots,
+		bindings:     bindings,
+		accounts:     accounts,
+		capabilities: capabilities,
+		cipher:       cipher,
+		provider:     provider,
+		runtimes:     runtimes,
 	}
 }
 
 type CreateBotInput struct {
-	ExternalUserID string
-	Name           string
-	ChannelType    string
+	ExternalUserID    string
+	Name              string
+	ChannelType       string
+	AgentCapabilityID string
+	AgentMode         string
 }
 
 type CreateBotOutput struct {
-	BotID            string
-	Name             string
-	ChannelType      string
-	ConnectionStatus string
-	ChannelAccountID string
+	BotID             string
+	Name              string
+	ChannelType       string
+	ConnectionStatus  string
+	ChannelAccountID  string
+	AgentCapabilityID string
+	AgentMode         string
 }
 
 func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (CreateBotOutput, error) {
@@ -62,21 +69,25 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		return CreateBotOutput{}, err
 	}
 	bot, err := s.bots.Create(ctx, domain.Bot{
-		ID:               domain.NewPrefixedID("bot"),
-		UserID:           user.ID,
-		Name:             input.Name,
-		ChannelType:      input.ChannelType,
-		ConnectionStatus: domain.BotConnectionStatusLoginRequired,
+		ID:                domain.NewPrefixedID("bot"),
+		UserID:            user.ID,
+		Name:              input.Name,
+		ChannelType:       input.ChannelType,
+		ConnectionStatus:  domain.BotConnectionStatusLoginRequired,
+		AgentCapabilityID: input.AgentCapabilityID,
+		AgentMode:         input.AgentMode,
 	})
 	if err != nil {
 		return CreateBotOutput{}, err
 	}
 	return CreateBotOutput{
-		BotID:            bot.ID,
-		Name:             bot.Name,
-		ChannelType:      bot.ChannelType,
-		ConnectionStatus: bot.ConnectionStatus,
-		ChannelAccountID: bot.ChannelAccountID,
+		BotID:             bot.ID,
+		Name:              bot.Name,
+		ChannelType:       bot.ChannelType,
+		ConnectionStatus:  bot.ConnectionStatus,
+		ChannelAccountID:  bot.ChannelAccountID,
+		AgentCapabilityID: bot.AgentCapabilityID,
+		AgentMode:         bot.AgentMode,
 	}, nil
 }
 
@@ -98,11 +109,13 @@ func (s *BotService) DeleteBot(ctx context.Context, botID string) error {
 }
 
 type BotListItem struct {
-	BotID            string
-	Name             string
-	ChannelType      string
-	ConnectionStatus string
-	ChannelAccountID string
+	BotID             string
+	Name              string
+	ChannelType       string
+	ConnectionStatus  string
+	ChannelAccountID  string
+	AgentCapabilityID string
+	AgentMode         string
 }
 
 type StartBotLoginOutput struct {
@@ -233,11 +246,68 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 	items := make([]BotListItem, 0, len(bots))
 	for _, bot := range bots {
 		items = append(items, BotListItem{
-			BotID:            bot.ID,
-			Name:             bot.Name,
-			ChannelType:      bot.ChannelType,
-			ConnectionStatus: bot.ConnectionStatus,
-			ChannelAccountID: bot.ChannelAccountID,
+			BotID:             bot.ID,
+			Name:              bot.Name,
+			ChannelType:       bot.ChannelType,
+			ConnectionStatus:  bot.ConnectionStatus,
+			ChannelAccountID:  bot.ChannelAccountID,
+			AgentCapabilityID: bot.AgentCapabilityID,
+			AgentMode:         bot.AgentMode,
+		})
+	}
+	return items, nil
+}
+
+type ConfigureBotAgentInput struct {
+	BotID             string
+	AgentCapabilityID string
+	AgentMode         string
+}
+
+func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAgentInput) (BotListItem, error) {
+	if input.BotID == "" || input.AgentCapabilityID == "" || input.AgentMode == "" {
+		return BotListItem{}, domain.ErrInvalidArg
+	}
+	bot, err := s.bots.GetByID(ctx, input.BotID)
+	if err != nil {
+		return BotListItem{}, err
+	}
+	bot.AgentCapabilityID = input.AgentCapabilityID
+	bot.AgentMode = input.AgentMode
+	bot, err = s.bots.Update(ctx, bot)
+	if err != nil {
+		return BotListItem{}, err
+	}
+	return BotListItem{
+		BotID:             bot.ID,
+		Name:              bot.Name,
+		ChannelType:       bot.ChannelType,
+		ConnectionStatus:  bot.ConnectionStatus,
+		ChannelAccountID:  bot.ChannelAccountID,
+		AgentCapabilityID: bot.AgentCapabilityID,
+		AgentMode:         bot.AgentMode,
+	}, nil
+}
+
+type AgentCapabilityListItem struct {
+	ID             string
+	Key            string
+	Label          string
+	SupportedModes []string
+}
+
+func (s *BotService) ListAgentCapabilities(ctx context.Context) ([]AgentCapabilityListItem, error) {
+	capabilities, err := s.capabilities.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]AgentCapabilityListItem, 0, len(capabilities))
+	for _, capability := range capabilities {
+		items = append(items, AgentCapabilityListItem{
+			ID:             capability.ID,
+			Key:            capability.Key,
+			Label:          capability.Label,
+			SupportedModes: append([]string(nil), capability.SupportedModes...),
 		})
 	}
 	return items, nil

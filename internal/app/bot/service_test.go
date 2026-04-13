@@ -1,4 +1,4 @@
-package app
+package bot
 
 import (
 	"context"
@@ -49,6 +49,7 @@ func newTestBotServiceWithRuntimeStarter(t *testing.T, starter channel.RuntimeSt
 		bots,
 		repositories.NewChannelBindingRepository(db),
 		accounts,
+		repositories.NewAgentCapabilityRepository(db),
 		cipher,
 		provider,
 		runtimes,
@@ -73,6 +74,7 @@ func newTestBotServiceWithProvider(t *testing.T, provider channel.Provider) *Bot
 		bots,
 		repositories.NewChannelBindingRepository(db),
 		accounts,
+		repositories.NewAgentCapabilityRepository(db),
 		cipher,
 		provider,
 		runtimes,
@@ -89,15 +91,15 @@ func newTestBotServiceAndProvider(t *testing.T) (*BotService, *wechat.FakeProvid
 	return newTestBotServiceWithProvider(t, provider), provider
 }
 
-
-
 func TestBotServiceCreateBot(t *testing.T) {
 	svc := newTestBotService(t)
 
 	got, err := svc.CreateBot(context.Background(), CreateBotInput{
-		ExternalUserID: "u_123",
-		Name:           "sales-bot",
-		ChannelType:    "wechat",
+		ExternalUserID:    "u_123",
+		Name:              "sales-bot",
+		ChannelType:       "wechat",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +112,12 @@ func TestBotServiceCreateBot(t *testing.T) {
 	}
 	if got.ChannelType != "wechat" {
 		t.Fatalf("unexpected channel type: %s", got.ChannelType)
+	}
+	if got.AgentCapabilityID != "cap_claude" {
+		t.Fatalf("unexpected agent capability id: %s", got.AgentCapabilityID)
+	}
+	if got.AgentMode != "session" {
+		t.Fatalf("unexpected agent mode: %s", got.AgentMode)
 	}
 	if got.ChannelAccountID != "" {
 		t.Fatalf("unexpected channel account id: %s", got.ChannelAccountID)
@@ -128,6 +136,12 @@ func TestBotServiceCreateBot(t *testing.T) {
 	if stored.ChannelType != "wechat" {
 		t.Fatalf("unexpected stored channel type: %s", stored.ChannelType)
 	}
+	if stored.AgentCapabilityID != "cap_claude" {
+		t.Fatalf("unexpected stored agent capability id: %s", stored.AgentCapabilityID)
+	}
+	if stored.AgentMode != "session" {
+		t.Fatalf("unexpected stored agent mode: %s", stored.AgentMode)
+	}
 	if stored.ConnectionStatus != domain.BotConnectionStatusLoginRequired {
 		t.Fatalf("unexpected stored connection status: %s", stored.ConnectionStatus)
 	}
@@ -144,9 +158,11 @@ func TestBotServiceCreateBotRejectsEmptyInput(t *testing.T) {
 func TestBotServiceListBots(t *testing.T) {
 	svc := newTestBotService(t)
 	_, err := svc.CreateBot(context.Background(), CreateBotInput{
-		ExternalUserID: "u_123",
-		Name:           "sales-bot",
-		ChannelType:    "wechat",
+		ExternalUserID:    "u_123",
+		Name:              "sales-bot",
+		ChannelType:       "wechat",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +183,12 @@ func TestBotServiceListBots(t *testing.T) {
 	}
 	if items[0].ConnectionStatus != domain.BotConnectionStatusLoginRequired {
 		t.Fatalf("unexpected connection status: %s", items[0].ConnectionStatus)
+	}
+	if items[0].AgentCapabilityID != "cap_claude" {
+		t.Fatalf("unexpected agent capability id: %s", items[0].AgentCapabilityID)
+	}
+	if items[0].AgentMode != "session" {
+		t.Fatalf("unexpected agent mode: %s", items[0].AgentMode)
 	}
 	if items[0].ChannelAccountID != "" {
 		t.Fatalf("unexpected channel account id: %s", items[0].ChannelAccountID)
@@ -199,6 +221,12 @@ func TestBotServiceListBotsReturnsLatestState(t *testing.T) {
 	}
 	if items[0].ConnectionStatus != domain.BotConnectionStatusConnected {
 		t.Fatalf("unexpected connection status: %s", items[0].ConnectionStatus)
+	}
+	if items[0].AgentCapabilityID != stored.AgentCapabilityID {
+		t.Fatalf("unexpected agent capability id: %s", items[0].AgentCapabilityID)
+	}
+	if items[0].AgentMode != stored.AgentMode {
+		t.Fatalf("unexpected agent mode: %s", items[0].AgentMode)
 	}
 	if items[0].ChannelAccountID != "acct_1" {
 		t.Fatalf("unexpected channel account id: %s", items[0].ChannelAccountID)
@@ -252,6 +280,95 @@ func TestBotServiceListBotsRejectsEmptyUser(t *testing.T) {
 	_, err := svc.ListBots(context.Background(), "")
 	if err != domain.ErrInvalidArg {
 		t.Fatalf("expected ErrInvalidArg, got %v", err)
+	}
+}
+
+func TestBotServiceConfigureBotAgent(t *testing.T) {
+	svc := newTestBotService(t)
+	created, err := svc.CreateBot(context.Background(), CreateBotInput{
+		ExternalUserID: "u_123",
+		Name:           "sales-bot",
+		ChannelType:    "wechat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.ConfigureBotAgent(context.Background(), ConfigureBotAgentInput{
+		BotID:              created.BotID,
+		AgentCapabilityID:  "cap_codex",
+		AgentMode:          "oneshot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.BotID != created.BotID {
+		t.Fatalf("unexpected bot id: %s", updated.BotID)
+	}
+	if updated.AgentCapabilityID != "cap_codex" {
+		t.Fatalf("unexpected agent capability id: %s", updated.AgentCapabilityID)
+	}
+	if updated.AgentMode != "oneshot" {
+		t.Fatalf("unexpected agent mode: %s", updated.AgentMode)
+	}
+
+	stored, err := svc.bots.GetByID(context.Background(), created.BotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentCapabilityID != "cap_codex" {
+		t.Fatalf("unexpected stored agent capability id: %s", stored.AgentCapabilityID)
+	}
+	if stored.AgentMode != "oneshot" {
+		t.Fatalf("unexpected stored agent mode: %s", stored.AgentMode)
+	}
+}
+
+func TestBotServiceConfigureBotAgentRejectsEmptyInput(t *testing.T) {
+	svc := newTestBotService(t)
+	_, err := svc.ConfigureBotAgent(context.Background(), ConfigureBotAgentInput{})
+	if err != domain.ErrInvalidArg {
+		t.Fatalf("expected ErrInvalidArg, got %v", err)
+	}
+}
+
+func TestBotServiceListAgentCapabilities(t *testing.T) {
+	svc := newTestBotService(t)
+	repo, ok := svc.capabilities.(*repositories.AgentCapabilityRepository)
+	if !ok {
+		t.Fatal("expected repository implementation")
+	}
+	_, err := repo.Upsert(context.Background(), domain.AgentCapability{
+		ID:             "cap_claude",
+		Key:            "claude",
+		Label:          "Claude",
+		Command:        "claude",
+		Args:           []string{"--print"},
+		SupportedModes: []string{"oneshot", "session"},
+		Available:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := svc.ListAgentCapabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 capability, got %d", len(items))
+	}
+	if items[0].ID != "cap_claude" {
+		t.Fatalf("unexpected capability id: %s", items[0].ID)
+	}
+	if items[0].Key != "claude" {
+		t.Fatalf("unexpected capability key: %s", items[0].Key)
+	}
+	if items[0].Label != "Claude" {
+		t.Fatalf("unexpected capability label: %s", items[0].Label)
+	}
+	if len(items[0].SupportedModes) != 2 {
+		t.Fatalf("unexpected supported modes: %#v", items[0].SupportedModes)
 	}
 }
 

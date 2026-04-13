@@ -27,3 +27,10 @@ type BotRepository interface {
 	Update(ctx context.Context, bot Bot) (Bot, error)
 	DeleteByID(ctx context.Context, id string) error
 }
+
+type AgentCapabilityRepository interface {
+	Upsert(ctx context.Context, capability AgentCapability) (AgentCapability, error)
+	GetByID(ctx context.Context, id string) (AgentCapability, error)
+	GetByKey(ctx context.Context, key string) (AgentCapability, error)
+	List(ctx context.Context) ([]AgentCapability, error)
+}

@@ -2,10 +2,16 @@ package wechat
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/benenen/myclaw/internal/logging"
 )
 
 func TestHTTPClientCreateBindingSession(t *testing.T) {
@@ -176,5 +182,393 @@ func TestHTTPClientGetMessagesLongPollParsesMessagesAndCursor(t *testing.T) {
 	}
 	if got.Messages[0].Text != "你好\n第二行" {
 		t.Fatalf("unexpected text: %q", got.Messages[0].Text)
+	}
+}
+
+func TestHTTPClientGetMessagesLongPollReturnsBodyOnNon200NonJSONError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("gateway exploded"))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	_, err := client.GetMessagesLongPoll(context.Background(), GetUpdatesOptions{Timeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "decode getupdates response") {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status=502") || !strings.Contains(err.Error(), `body="gateway exploded"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientGetMessagesLongPollReturnsEnvelopeDetailsOnNon200JSONError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"ret":123,"errcode":40013,"errmsg":"invalid cursor"}`))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	got, err := client.GetMessagesLongPoll(context.Background(), GetUpdatesOptions{Timeout: 5 * time.Second})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got.Ret != 123 || got.ErrCode != 40013 || got.ErrMsg != "invalid cursor" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if !strings.Contains(err.Error(), "status=502") || !strings.Contains(err.Error(), "ret=123") || !strings.Contains(err.Error(), "errcode=40013") || !strings.Contains(err.Error(), `errmsg="invalid cursor"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessage(t *testing.T) {
+	requestErrCh := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ilink/bot/sendmsg" {
+			requestErrCh <- fmt.Errorf("path = %s", r.URL.Path)
+			return
+		}
+		if got := r.Header.Get("AuthorizationType"); got != "ilink_bot_token" {
+			requestErrCh <- fmt.Errorf("AuthorizationType = %q", got)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token" {
+			requestErrCh <- fmt.Errorf("Authorization = %q", got)
+			return
+		}
+		if got := r.Header.Get("X-WECHAT-UIN"); got != "uin" {
+			requestErrCh <- fmt.Errorf("X-WECHAT-UIN = %q", got)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			requestErrCh <- fmt.Errorf("decode body: %v", err)
+			return
+		}
+		if body["to_user_id"] != "user-1" || body["text"] != "hello" {
+			requestErrCh <- fmt.Errorf("body = %#v", body)
+			return
+		}
+		requestErrCh <- nil
+		_, _ = w.Write([]byte(`{"ret":0,"errcode":0}`))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	if err := client.SendTextMessage(context.Background(), SendMessageOptions{Token: "token", WechatUIN: "uin", ToUserID: "user-1", Text: "hello"}); err != nil {
+		t.Fatalf("SendTextMessage() error = %v", err)
+	}
+	if err := <-requestErrCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPClientSendTextMessageSetsDefaultTimeoutWithoutDeadline(t *testing.T) {
+	client := &HTTPClient{
+		baseURL:   "http://127.0.0.1:1",
+		authToken: "token",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			deadline, ok := req.Context().Deadline()
+			if !ok {
+				return nil, fmt.Errorf("missing deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 || remaining > 30*time.Second {
+				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"ret":0,"errcode":0}`)),
+			}, nil
+		})},
+		logger: logging.New("debug"),
+	}
+
+	if err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"}); err != nil {
+		t.Fatalf("SendTextMessage() error = %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutExpires(t *testing.T) {
+	client := &HTTPClient{
+		baseURL:   "http://127.0.0.1:1",
+		authToken: "token",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			deadline, ok := req.Context().Deadline()
+			if !ok {
+				return nil, fmt.Errorf("missing deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 || remaining > 30*time.Second {
+				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
+			}
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})},
+		logger: logging.New("debug"),
+	}
+
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutAlreadyExpired(t *testing.T) {
+	client := &HTTPClient{
+		baseURL:   "http://127.0.0.1:1",
+		authToken: "token",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})},
+		logger: logging.New("debug"),
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestContextWithDefaultTimeoutAddsDeadlineWhenMissing(t *testing.T) {
+	ctx, cancel := contextWithDefaultTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > 30*time.Second {
+		t.Fatalf("unexpected remaining time: %s", remaining)
+	}
+}
+
+func TestContextWithDefaultTimeoutPreservesExistingDeadline(t *testing.T) {
+	original, originalCancel := context.WithTimeout(context.Background(), time.Second)
+	defer originalCancel()
+
+	ctx, cancel := contextWithDefaultTimeout(original, 30*time.Second)
+	defer cancel()
+
+	if ctx != original {
+		t.Fatal("expected original context")
+	}
+}
+
+func TestContextWithDefaultTimeoutCancelsDerivedContext(t *testing.T) {
+	ctx, cancel := contextWithDefaultTimeout(context.Background(), time.Second)
+	cancel()
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("expected canceled context, got %v", ctx.Err())
+	}
+}
+
+func TestHTTPClientSendTextMessageUsesDefaultTimeoutWhenTransportWaitsForCancellation(t *testing.T) {
+	client := &HTTPClient{
+		baseURL:   "http://127.0.0.1:1",
+		authToken: "token",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			deadline, ok := req.Context().Deadline()
+			if !ok {
+				return nil, fmt.Errorf("missing deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 || remaining > 30*time.Second {
+				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
+			}
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})},
+		logger: logging.New("debug"),
+	}
+
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessagePreservesExistingDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client := &HTTPClient{
+		baseURL:   "http://127.0.0.1:1",
+		authToken: "token",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			deadline, ok := req.Context().Deadline()
+			if !ok {
+				return nil, fmt.Errorf("missing deadline")
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 || remaining > 2*time.Second {
+				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"ret":0,"errcode":0}`)),
+			}, nil
+		})},
+		logger: logging.New("debug"),
+	}
+
+	if err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello"}); err != nil {
+		t.Fatalf("SendTextMessage() error = %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsHTTPErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "gateway exploded", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "status=502") || !strings.Contains(err.Error(), "gateway exploded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ret":0,"errcode":40013,"errmsg":"invalid recipient"}`))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "errcode=40013") || !strings.Contains(err.Error(), `errmsg="invalid recipient"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsBodyOnNonJSONError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("not-json"))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "decode sendmsg response") {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status=500") || !strings.Contains(err.Error(), `body="not-json"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageReturnsEnvelopeDetailsOnNon200JSONError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"ret":123,"errcode":40013,"errmsg":"invalid recipient"}`))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "status=502") || !strings.Contains(err.Error(), "ret=123") || !strings.Contains(err.Error(), "errcode=40013") || !strings.Contains(err.Error(), `errmsg="invalid recipient"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDecodeSendMessageResponseReturnsBodyOnDecodeError(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("not-json")),
+	}
+
+	err := decodeSendMessageResponse(resp)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `body="not-json"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDecodeJSONResponseIncludesBodyOnNon200(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader("bad request body")),
+	}
+
+	_, err := decodeJSONResponse[map[string]any](resp, "action")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `body="bad request body"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDecodeJSONResponseIncludesBodyOnDecodeFailure(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("not-json")),
+	}
+
+	_, err := decodeJSONResponse[map[string]any](resp, "action")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `body="not-json"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDecodeSendMessageResponseReturnsAPIErrorWithBody(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"ret":1,"errcode":2,"errmsg":"boom"}`)),
+	}
+
+	err := decodeSendMessageResponse(resp)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "errcode=2") || !strings.Contains(err.Error(), `body="{\"ret\":1,\"errcode\":2,\"errmsg\":\"boom\"}"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

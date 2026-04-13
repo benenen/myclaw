@@ -5,12 +5,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/benenen/myclaw/internal/channel"
 )
 
 var ErrSessionExpired = errors.New("wechat session expired")
+
+func classifyRuntimePollError(err error) error {
+	if err == nil {
+		return nil
+	}
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "errcode=-14") || strings.Contains(lower, "session timeout") || strings.Contains(lower, "session expired") {
+		return fmt.Errorf("%w: %v", ErrSessionExpired, err)
+	}
+	return err
+}
+
+func nextPollTimeout(current time.Duration, next time.Duration) time.Duration {
+	if next > 0 {
+		return next
+	}
+	if current > 0 {
+		return current
+	}
+	return 35 * time.Second
+}
 
 type wechatRuntimeHandle struct {
 	done   chan struct{}
@@ -77,14 +99,15 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 					if runtimeCtx.Err() != nil {
 						return
 					}
-					p.logger.Info("wechat runtime poll error", "bot_id", req.BotID, "error", err)
-					if updates.ErrCode == -14 {
+					classifiedErr := classifyRuntimePollError(err)
+					p.logger.Info("wechat runtime poll error", "bot_id", req.BotID, "error", classifiedErr)
+					if errors.Is(classifiedErr, ErrSessionExpired) {
 						if req.Callbacks.OnState != nil {
 							req.Callbacks.OnState(channel.RuntimeStateEvent{
 								BotID:       req.BotID,
 								ChannelType: req.ChannelType,
 								State:       channel.RuntimeStateError,
-								Err:         fmt.Errorf("%w: %v", ErrSessionExpired, err),
+								Err:         classifiedErr,
 							})
 						}
 						return
@@ -92,23 +115,34 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 					time.Sleep(2 * time.Second)
 					continue
 				}
-				p.logger.Debug("wechat runtime poll ok", "bot_id", req.BotID, "messages", len(updates.Messages), "cursor_len", len(updates.Cursor), "next_timeout", updates.NextTimeout)
+				pollTimeout = nextPollTimeout(pollTimeout, updates.NextTimeout)
+				p.logger.Debug("wechat runtime poll ok", "bot_id", req.BotID, "messages", len(updates.Messages), "cursor_len", len(updates.Cursor), "next_timeout", updates.NextTimeout, "poll_timeout", pollTimeout)
 				if updates.Cursor != "" {
 					cursor = updates.Cursor
 				}
-				if updates.NextTimeout > 0 {
-					pollTimeout = updates.NextTimeout
-				}
 				for _, msg := range updates.Messages {
 					if req.Callbacks.OnEvent != nil {
-						req.Callbacks.OnEvent(channel.RuntimeEvent{
-							BotID:       req.BotID,
+						replyTarget := channel.ReplyTarget{
 							ChannelType: req.ChannelType,
-							MessageID:   msg.MsgID,
-							From:        msg.From,
-							Text:        msg.Text,
-							Raw:         msg.Raw,
-						})
+							RecipientID: msg.From,
+							Metadata: map[string]string{
+								"account_uid": req.AccountUID,
+								"base_url":    baseURL,
+								"token":       botToken,
+								"wechat_uin":  wechatUIN,
+							},
+						}
+						if req.Callbacks.OnEvent != nil {
+							req.Callbacks.OnEvent(channel.RuntimeEvent{
+								BotID:       req.BotID,
+								ChannelType: req.ChannelType,
+								MessageID:   msg.MsgID,
+								From:        msg.From,
+								Text:        msg.Text,
+								ReplyTarget: replyTarget,
+								Raw:         msg.Raw,
+							})
+						}
 					}
 				}
 			}

@@ -9,8 +9,13 @@ import (
 
 func TestEmbeddedIndexSelectsBotBeforeRenderingList(t *testing.T) {
 	html := string(indexHTML)
-	selectionIndex := strings.Index(html, "  if (preferBotId) {\n    selectedBotId = preferBotId;\n  } else if (!bots.some(b => b.bot_id === selectedBotId)) {\n    selectedBotId = bots[0]?.bot_id || '';\n  }")
-	listIndex := strings.Index(html, "  renderBotList();")
+	start := strings.Index(html, "async function loadBots(preferBotId) {")
+	if start == -1 {
+		t.Fatalf("loadBots function not found")
+	}
+	body := html[start:]
+	selectionIndex := strings.Index(body, "  if (preferBotId) {\n    selectedBotId = preferBotId;\n  } else if (!bots.some(b => b.bot_id === selectedBotId)) {\n    selectedBotId = bots[0]?.bot_id || '';\n  }")
+	listIndex := strings.Index(body, "  renderBotList();")
 	if selectionIndex == -1 {
 		t.Fatalf("selection fallback snippet not found")
 	}
@@ -19,6 +24,14 @@ func TestEmbeddedIndexSelectsBotBeforeRenderingList(t *testing.T) {
 	}
 	if selectionIndex > listIndex {
 		t.Fatalf("selection fallback appears after renderBotList")
+	}
+}
+
+func TestEmbeddedIndexLoadsCapabilitiesBeforeBots(t *testing.T) {
+	html := string(indexHTML)
+	capabilitiesIndex := strings.Index(html, "loadAgentCapabilities().then(() => loadBots());")
+	if capabilitiesIndex == -1 {
+		t.Fatalf("capability bootstrap call not found")
 	}
 }
 
@@ -33,7 +46,7 @@ func TestHandlerServesRuntimeConsoleBranding(t *testing.T) {
 	if strings.Contains(body, "Channel Plugin") {
 		t.Fatalf("response still contains old product name: %q", body)
 	}
-	for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "qr-modal", "showQRModal(result.qr_code_payload, result.qr_share_url, result.status)", "copyShareURL()", "qr-share-link", "document.getElementById('connect-result').innerHTML = ''", "id=\"qr-status-text\"", "image.src = payload", "deleteBot(", "Delete bot"} {
+	for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "qr-modal", "showQRModal(result.qr_code_payload, result.qr_share_url, result.status)", "copyShareURL()", "qr-share-link", "document.getElementById('connect-result').innerHTML = ''", "id=\"qr-status-text\"", "image.src = payload", "deleteBot(", "Delete bot", "agent-capabilities", "create-bot-capability", "create-bot-mode", "detail-agent-capability", "detail-agent-mode", "saveSelectedBotAgent()", "loadAgentCapabilities()", "supported_modes", "agent_capability_id", "agent_mode"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("response does not contain %q: %q", want, body)
 		}

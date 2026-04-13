@@ -12,7 +12,7 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"users", "channel_accounts", "channel_bindings", "bots"} {
+	for _, table := range []string{"users", "channel_accounts", "channel_bindings", "bots", "agent_capabilities"} {
 		var count int64
 		err := db.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count).Error
 		if err != nil {

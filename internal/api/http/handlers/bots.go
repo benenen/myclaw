@@ -7,11 +7,11 @@ import (
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	"github.com/benenen/myclaw/internal/api/http/dto"
-	"github.com/benenen/myclaw/internal/app"
+	botapp "github.com/benenen/myclaw/internal/app/bot"
 	"github.com/benenen/myclaw/internal/domain"
 )
 
-func CreateBot(svc *app.BotService) stdhttp.HandlerFunc {
+func CreateBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		var req dto.CreateBotRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -23,10 +23,12 @@ func CreateBot(svc *app.BotService) stdhttp.HandlerFunc {
 			return
 		}
 
-		result, err := svc.CreateBot(r.Context(), app.CreateBotInput{
-			ExternalUserID: req.UserID,
-			Name:           req.Name,
-			ChannelType:    req.ChannelType,
+		result, err := svc.CreateBot(r.Context(), botapp.CreateBotInput{
+			ExternalUserID:    req.UserID,
+			Name:              req.Name,
+			ChannelType:       req.ChannelType,
+			AgentCapabilityID: req.AgentCapabilityID,
+			AgentMode:         req.AgentMode,
 		})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
@@ -38,16 +40,18 @@ func CreateBot(svc *app.BotService) stdhttp.HandlerFunc {
 		}
 
 		httpapi.WriteOKFromRequest(w, r, dto.CreateBotResponse{
-			BotID:            result.BotID,
-			Name:             result.Name,
-			ChannelType:      result.ChannelType,
-			ConnectionStatus: result.ConnectionStatus,
-			ChannelAccountID: result.ChannelAccountID,
+			BotID:             result.BotID,
+			Name:              result.Name,
+			ChannelType:       result.ChannelType,
+			ConnectionStatus:  result.ConnectionStatus,
+			ChannelAccountID:  result.ChannelAccountID,
+			AgentCapabilityID: result.AgentCapabilityID,
+			AgentMode:         result.AgentMode,
 		})
 	}
 }
 
-func ListBots(svc *app.BotService) stdhttp.HandlerFunc {
+func ListBots(svc *botapp.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		userID := r.URL.Query().Get("user_id")
 		if userID == "" {
@@ -68,18 +72,62 @@ func ListBots(svc *app.BotService) stdhttp.HandlerFunc {
 		resp := make([]dto.BotResponse, 0, len(items))
 		for _, item := range items {
 			resp = append(resp, dto.BotResponse{
-				BotID:            item.BotID,
-				Name:             item.Name,
-				ChannelType:      item.ChannelType,
-				ConnectionStatus: item.ConnectionStatus,
-				ChannelAccountID: item.ChannelAccountID,
+				BotID:             item.BotID,
+				Name:              item.Name,
+				ChannelType:       item.ChannelType,
+				ConnectionStatus:  item.ConnectionStatus,
+				ChannelAccountID:  item.ChannelAccountID,
+				AgentCapabilityID: item.AgentCapabilityID,
+				AgentMode:         item.AgentMode,
 			})
 		}
 		httpapi.WriteOKFromRequest(w, r, resp)
 	}
 }
 
-func ConnectBot(svc *app.BotService) stdhttp.HandlerFunc {
+func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
+	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		var req dto.ConfigureBotAgentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "invalid request body")
+			return
+		}
+		if req.BotID == "" || req.AgentCapabilityID == "" || req.AgentMode == "" {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "bot_id, agent_capability_id and agent_mode are required")
+			return
+		}
+
+		result, err := svc.ConfigureBotAgent(r.Context(), botapp.ConfigureBotAgentInput{
+			BotID:             req.BotID,
+			AgentCapabilityID: req.AgentCapabilityID,
+			AgentMode:         req.AgentMode,
+		})
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidArg) {
+				httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
+				return
+			}
+			if errors.Is(err, domain.ErrNotFound) {
+				httpapi.WriteError(w, r, "NOT_FOUND", err.Error())
+				return
+			}
+			httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
+			return
+		}
+
+		httpapi.WriteOKFromRequest(w, r, dto.ConfigureBotAgentResponse{
+			BotID:             result.BotID,
+			Name:              result.Name,
+			ChannelType:       result.ChannelType,
+			ConnectionStatus:  result.ConnectionStatus,
+			ChannelAccountID:  result.ChannelAccountID,
+			AgentCapabilityID: result.AgentCapabilityID,
+			AgentMode:         result.AgentMode,
+		})
+	}
+}
+
+func ConnectBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		var req dto.ConnectBotRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -91,7 +139,7 @@ func ConnectBot(svc *app.BotService) stdhttp.HandlerFunc {
 			return
 		}
 
-		result, err := svc.StartLogin(r.Context(), app.StartBotLoginInput{BotID: req.BotID})
+		result, err := svc.StartLogin(r.Context(), botapp.StartBotLoginInput{BotID: req.BotID})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
 				httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
@@ -116,7 +164,7 @@ func ConnectBot(svc *app.BotService) stdhttp.HandlerFunc {
 	}
 }
 
-func DeleteBot(svc *app.BotService) stdhttp.HandlerFunc {
+func DeleteBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		var req dto.DeleteBotRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -148,7 +196,7 @@ func DeleteBot(svc *app.BotService) stdhttp.HandlerFunc {
 	}
 }
 
-func RefreshBotLogin(svc *app.BotService) stdhttp.HandlerFunc {
+func RefreshBotLogin(svc *botapp.BotService) stdhttp.HandlerFunc {
 	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		bindingID := r.URL.Query().Get("binding_id")
 		if bindingID == "" {

@@ -506,6 +506,23 @@ pre {
         </div>
 
         <div class="card">
+          <h3>Agent</h3>
+          <div class="form-grid">
+            <div class="field wide">
+              <label>Capability</label>
+              <select id="detail-agent-capability"></select>
+            </div>
+            <div class="field wide">
+              <label>Mode</label>
+              <select id="detail-agent-mode"></select>
+            </div>
+            <div class="field action">
+              <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
           <h3>Connect</h3>
           <button class="btn-primary" onclick="connectSelectedBot()">Login / Connect</button>
           <div id="connect-result"></div>
@@ -528,6 +545,14 @@ pre {
         <select id="create-bot-channel">
           <option value="wechat">wechat</option>
         </select>
+      </div>
+      <div class="field wide">
+        <label>Capability</label>
+        <select id="create-bot-capability"></select>
+      </div>
+      <div class="field wide">
+        <label>Mode</label>
+        <select id="create-bot-mode"></select>
       </div>
     </div>
     <div class="modal-actions">
@@ -557,9 +582,91 @@ pre {
 <script>
 const API = '/api/v1';
 let bots = [];
+let agentCapabilities = [];
 let selectedBotId = '';
 let loginPollTimer = null;
 let activeBindingId = '';
+
+async function loadAgentCapabilities() {
+  const data = await api('GET', '/agent-capabilities');
+  if (data.code !== 'OK') {
+    toast(data.message || data.code);
+    return;
+  }
+  agentCapabilities = data.data || [];
+  renderCapabilityOptions('create-bot-capability', 'create-bot-mode');
+  renderSelectedBotAgentControls();
+}
+
+function renderCapabilityOptions(capabilitySelectId, modeSelectId, selectedCapabilityId, selectedMode) {
+  const capabilitySelect = document.getElementById(capabilitySelectId);
+  const modeSelect = document.getElementById(modeSelectId);
+  if (!capabilitySelect || !modeSelect) {
+    return;
+  }
+  capabilitySelect.innerHTML = '<option value="">Default</option>' + agentCapabilities.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.key)}</option>`).join('');
+  capabilitySelect.value = selectedCapabilityId || '';
+  syncModeOptions(capabilitySelectId, modeSelectId, selectedMode);
+}
+
+function syncModeOptions(capabilitySelectId, modeSelectId, selectedMode) {
+  const capabilitySelect = document.getElementById(capabilitySelectId);
+  const modeSelect = document.getElementById(modeSelectId);
+  if (!capabilitySelect || !modeSelect) {
+    return;
+  }
+  const capability = agentCapabilities.find(item => item.id === capabilitySelect.value);
+  const modes = capability?.supported_modes || [];
+  modeSelect.innerHTML = '<option value="">Default</option>' + modes.map(mode => `<option value="${escapeHtml(mode)}">${escapeHtml(mode)}</option>`).join('');
+  const nextMode = modes.includes(selectedMode) ? selectedMode : '';
+  modeSelect.value = nextMode;
+}
+
+function selectedBot() {
+  return bots.find(b => b.bot_id === selectedBotId);
+}
+
+function renderSelectedBotAgentControls() {
+  const bot = selectedBot();
+  renderCapabilityOptions('detail-agent-capability', 'detail-agent-mode', bot?.agent_capability_id || '', bot?.agent_mode || '');
+}
+
+async function saveSelectedBotAgent() {
+  const bot = selectedBot();
+  if (!bot) {
+    toast('select a bot');
+    return;
+  }
+  const agentCapabilityID = document.getElementById('detail-agent-capability').value;
+  const agentMode = document.getElementById('detail-agent-mode').value;
+  if (!agentCapabilityID || !agentMode) {
+    toast('capability and mode required');
+    return;
+  }
+  const data = await api('POST', '/bots/agent', {
+    bot_id: bot.bot_id,
+    agent_capability_id: agentCapabilityID,
+    agent_mode: agentMode,
+  });
+  if (data.code !== 'OK') {
+    toast(data.message || data.code);
+    return;
+  }
+  const updated = data.data;
+  bot.agent_capability_id = updated.agent_capability_id;
+  bot.agent_mode = updated.agent_mode;
+  renderSelectedBotAgentControls();
+  renderBotList();
+  renderDetail();
+  toast('agent updated');
+}
+
+window.saveSelectedBotAgent = saveSelectedBotAgent;
+
+window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('create-bot-capability').addEventListener('change', () => syncModeOptions('create-bot-capability', 'create-bot-mode', ''));
+  document.getElementById('detail-agent-capability').addEventListener('change', () => syncModeOptions('detail-agent-capability', 'detail-agent-mode', ''));
+});
 
 function toast(msg) {
   const el = document.createElement('div');
@@ -610,16 +717,26 @@ async function createBot() {
   const userId = currentUserId();
   const name = document.getElementById('create-bot-name').value.trim();
   const channelType = document.getElementById('create-bot-channel').value;
+  const agentCapabilityID = document.getElementById('create-bot-capability').value;
+  const agentMode = document.getElementById('create-bot-mode').value;
   if (!userId || !name) {
     toast('user_id and name required');
     return;
   }
-  const data = await api('POST', '/bots/create', { user_id: userId, name, channel_type: channelType });
+  const data = await api('POST', '/bots/create', {
+    user_id: userId,
+    name,
+    channel_type: channelType,
+    agent_capability_id: agentCapabilityID,
+    agent_mode: agentMode,
+  });
   if (data.code !== 'OK') {
     toast(data.message || data.code);
     return;
   }
   document.getElementById('create-bot-name').value = '';
+  document.getElementById('create-bot-capability').value = '';
+  document.getElementById('create-bot-mode').innerHTML = '<option value="">Default</option>';
   closeCreateBotModal();
   await loadBots(data.data.bot_id);
 }
@@ -703,6 +820,7 @@ function renderDetail() {
   document.getElementById('detail-channel').textContent = bot.channel_type;
   document.getElementById('detail-bot-id').textContent = bot.bot_id;
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
+  renderSelectedBotAgentControls();
   if (!activeBindingId) {
     document.getElementById('connect-result').innerHTML = '';
   }
@@ -861,7 +979,7 @@ function escapeJs(value) {
     .replaceAll("'", "\\'");
 }
 
-loadBots();
+loadAgentCapabilities().then(() => loadBots());
 
 </script>
 </body>

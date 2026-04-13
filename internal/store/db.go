@@ -23,12 +23,14 @@ func Open(dsn string) (*gorm.DB, error) {
 }
 
 func Migrate(db *gorm.DB) error {
-	sql, err := migrationsFS.ReadFile("migrations/0001_init.sql")
-	if err != nil {
-		return fmt.Errorf("read migration: %w", err)
-	}
-	if err := db.Exec(string(sql)).Error; err != nil {
-		return fmt.Errorf("exec migration: %w", err)
+	for _, name := range []string{"0001_init.sql", "0002_agent_capabilities.sql"} {
+		sql, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		if err := db.Exec(string(sql)).Error; err != nil {
+			return fmt.Errorf("exec migration %s: %w", name, err)
+		}
 	}
 	return nil
 }

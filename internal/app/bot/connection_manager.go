@@ -1,4 +1,4 @@
-package app
+package bot
 
 import (
 	"context"
@@ -22,19 +22,18 @@ type BotConnectionManager struct {
 	starter  channel.RuntimeStarter
 	cipher   *security.Cipher
 	logger   *logging.Logger
+	onEvent  func(channel.RuntimeEvent)
 }
 
 func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, logger *logging.Logger) *BotConnectionManager {
-	return &BotConnectionManager{
-		handles:  make(map[string]channel.RuntimeHandle),
-		bots:     bots,
-		accounts: accounts,
-		starter:  starter,
-		logger:   logger,
-	}
+	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, logger, nil)
 }
 
 func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger) *BotConnectionManager {
+	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, cipher, logger, nil)
+}
+
+func NewBotConnectionManagerWithCallbacks(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger, onEvent func(channel.RuntimeEvent)) *BotConnectionManager {
 	return &BotConnectionManager{
 		handles:  make(map[string]channel.RuntimeHandle),
 		bots:     bots,
@@ -42,6 +41,7 @@ func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domai
 		starter:  starter,
 		cipher:   cipher,
 		logger:   logger,
+		onEvent:  onEvent,
 	}
 }
 
@@ -92,7 +92,12 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 			CredentialVersion: account.CredentialVersion,
 			Callbacks: channel.RuntimeCallbacks{
 				OnEvent: func(ev channel.RuntimeEvent) {
-					m.logger.Info("runtime message", "bot_id", ev.BotID, "channel_type", ev.ChannelType, "message_id", ev.MessageID, "from", ev.From, "text", ev.Text)
+					if m.logger != nil {
+						m.logger.Info("runtime message", "bot_id", ev.BotID, "channel_type", ev.ChannelType, "message_id", ev.MessageID, "from", ev.From, "text", ev.Text)
+					}
+					if m.onEvent != nil {
+						m.onEvent(ev)
+					}
 				},
 				OnState: func(ev channel.RuntimeStateEvent) {
 					m.handleState(bot, ev)
@@ -101,7 +106,11 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 		}
 	}
 
-	handle, err := m.starter.StartRuntime(context.Background(), req)
+	runtimeCtx := context.Background()
+	if ctx != nil {
+		runtimeCtx = context.WithoutCancel(ctx)
+	}
+	handle, err := m.starter.StartRuntime(runtimeCtx, req)
 	if err != nil {
 		return err
 	}
@@ -156,4 +165,3 @@ func (m *BotConnectionManager) Active(botID string) bool {
 	_, ok := m.handles[botID]
 	return ok
 }
-
