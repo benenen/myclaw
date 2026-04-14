@@ -80,10 +80,10 @@ func TestHelperProcessCodexExecDriver(t *testing.T) {
 	}
 	args := os.Args
 	n := len(args)
-	if n < 6 || args[n-5] != "exec-success" {
+	if n < 8 || args[n-7] != "exec-success" {
 		os.Exit(2)
 	}
-	if args[n-4] != "exec" || args[n-3] != "--json" || args[n-2] != "--skip-git-repo-check" || args[n-1] != "你好" {
+	if args[n-6] != "exec" || args[n-5] != "--json" || args[n-4] != "--skip-git-repo-check" || args[n-3] != "resume" || args[n-2] != "--last" || args[n-1] != "你好" {
 		fmt.Fprintf(os.Stderr, "unexpected args: %#v", args)
 		os.Exit(3)
 	}
