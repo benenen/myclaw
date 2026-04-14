@@ -1,0 +1,28 @@
+@baseUrl = http://localhost:8080
+@botId = bot_01kp630sbgrn23dgf1rsabd7e3
+@from = debug_user
+@text = 你好，这是一个调试消息
+@recipientId = {{from}}
+@messageId = msg_debug_manual
+
+### Simulate message with server-generated message_id
+POST {{baseUrl}}/api/v1/bots/simulate-message
+Content-Type: application/json
+
+{
+  "bot_id": "{{botId}}",
+  "from": "{{from}}",
+  "text": "{{text}}"
+}
+
+### Simulate message with explicit message_id and recipient_id
+POST {{baseUrl}}/api/v1/bots/simulate-message
+Content-Type: application/json
+
+{
+  "bot_id": "{{botId}}",
+  "from": "{{from}}",
+  "text": "{{text}}",
+  "message_id": "{{messageId}}",
+  "recipient_id": "{{recipientId}}"
+}

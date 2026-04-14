@@ -57,6 +57,7 @@ func New(cfg config.Config) (*App, error) {
 	replyGateway := wechat.NewReplyGateway(wechatClient)
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{Timeout: botCLITimeout})
 	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
+	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
@@ -70,7 +71,8 @@ func New(cfg config.Config) (*App, error) {
 	mux.Handle("/", web.Handler())
 
 	handlers.RegisterRoutes(mux, handlers.Dependencies{
-		BotService: botSvc,
+		BotService:       botSvc,
+		MessageSimulator: messageSimulator,
 	})
 
 	go func() {

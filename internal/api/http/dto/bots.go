@@ -44,6 +44,22 @@ type DeleteBotRequest struct {
 	BotID string `json:"bot_id"`
 }
 
+type SimulateBotMessageRequest struct {
+	BotID       string `json:"bot_id"`
+	From        string `json:"from"`
+	Text        string `json:"text"`
+	MessageID   string `json:"message_id,omitempty"`
+	RecipientID string `json:"recipient_id,omitempty"`
+}
+
+type SimulateBotMessageResponse struct {
+	BotID       string `json:"bot_id"`
+	From        string `json:"from"`
+	Text        string `json:"text"`
+	MessageID   string `json:"message_id"`
+	RecipientID string `json:"recipient_id"`
+}
+
 type ConnectBotResponse struct {
 	BotID         string `json:"bot_id"`
 	BindingID     string `json:"binding_id"`

@@ -22,4 +22,40 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 			t.Fatalf("table %s not created", table)
 		}
 	}
+	var version int
+	var dirty bool
+	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
+		t.Fatalf("query schema version: %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("unexpected schema version: %d", version)
+	}
+	if dirty {
+		t.Fatal("expected clean schema version")
+	}
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+
+	var version int
+	var dirty bool
+	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
+		t.Fatalf("query schema version: %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("unexpected schema version: %d", version)
+	}
+	if dirty {
+		t.Fatal("expected clean schema version")
+	}
 }

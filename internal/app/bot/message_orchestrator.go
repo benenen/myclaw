@@ -17,7 +17,7 @@ const (
 	seenMessageTTL         = 10 * time.Minute
 	cleanupInterval        = time.Minute
 	workerIdleTimeout      = seenMessageTTL
-	processingTimeout      = 30 * time.Second
+	processingTimeout      = 300000 * time.Second
 	replyTimeout           = 5 * time.Second
 	finishWaitPollInterval = 10 * time.Millisecond
 	defaultQueueSize       = 1

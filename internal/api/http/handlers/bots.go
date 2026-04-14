@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	stdhttp "net/http"
+	"strings"
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	"github.com/benenen/myclaw/internal/api/http/dto"
@@ -192,6 +193,52 @@ func DeleteBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 
 		httpapi.WriteOKFromRequest(w, r, map[string]string{
 			"bot_id": req.BotID,
+		})
+	}
+}
+
+func SimulateBotMessage(svc MessageSimulator) stdhttp.HandlerFunc {
+	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		var req dto.SimulateBotMessageRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "invalid request body")
+			return
+		}
+		if strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.From) == "" || strings.TrimSpace(req.Text) == "" {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "bot_id, from and text are required")
+			return
+		}
+		if svc == nil {
+			httpapi.WriteError(w, r, "INTERNAL_ERROR", "message simulator is not configured")
+			return
+		}
+
+		result, err := svc.Simulate(r.Context(), botapp.SimulateMessageInput{
+			BotID:       req.BotID,
+			From:        req.From,
+			Text:        req.Text,
+			MessageID:   req.MessageID,
+			RecipientID: req.RecipientID,
+		})
+		if err != nil {
+			if errors.Is(err, domain.ErrInvalidArg) {
+				httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
+				return
+			}
+			if errors.Is(err, domain.ErrNotFound) {
+				httpapi.WriteError(w, r, "NOT_FOUND", err.Error())
+				return
+			}
+			httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
+			return
+		}
+
+		httpapi.WriteOKFromRequest(w, r, dto.SimulateBotMessageResponse{
+			BotID:       result.BotID,
+			From:        result.From,
+			Text:        result.Text,
+			MessageID:   result.MessageID,
+			RecipientID: result.RecipientID,
 		})
 	}
 }
