@@ -41,8 +41,8 @@ type replyGateway interface {
 	Reply(ctx context.Context, target channel.ReplyTarget, resp agent.Response) error
 }
 
-type driverRunner interface {
-	Run(ctx context.Context, spec agent.Spec, req agent.Request) (agent.Response, error)
+type executor interface {
+	Send(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error)
 }
 
 type botWorker struct {
@@ -66,7 +66,7 @@ type BotMessageOrchestrator struct {
 	bots              map[string]*botState
 	seen              map[string]seenMessageState
 	lastSeenCleanup   time.Time
-	driver            driverRunner
+	executor          executor
 	replies           replyGateway
 	resolver          specResolver
 	messageContext    func(context.Context) context.Context
@@ -75,11 +75,11 @@ type BotMessageOrchestrator struct {
 	replyTimeout      time.Duration
 }
 
-func NewBotMessageOrchestrator(driver driverRunner, replies replyGateway, resolver specResolver) *BotMessageOrchestrator {
+func NewBotMessageOrchestrator(executor executor, replies replyGateway, resolver specResolver) *BotMessageOrchestrator {
 	return &BotMessageOrchestrator{
 		bots:              make(map[string]*botState),
 		seen:              make(map[string]seenMessageState),
-		driver:            driver,
+		executor:          executor,
 		replies:           replies,
 		resolver:          resolver,
 		workerIdleTime:    workerIdleTimeout,
@@ -287,7 +287,7 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 
 	sendDone := make(chan sendResult, 1)
 	go func() {
-		resp, err := o.driver.Run(ctx, spec, agent.Request{
+		resp, err := o.executor.Send(ctx, msg.BotID, spec, agent.Request{
 			BotID:     msg.BotID,
 			UserID:    msg.From,
 			MessageID: msg.MessageID,

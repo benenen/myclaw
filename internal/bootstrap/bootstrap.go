@@ -52,10 +52,10 @@ func New(cfg config.Config) (*App, error) {
 	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
 	provider := wechat.NewProvider(wechatClient, logger)
 
-	driver := agent.NewOneshotDriver()
+	executor := agent.NewManager()
 	replyGateway := wechat.NewReplyGateway(wechatClient)
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{Timeout: botCLITimeout})
-	orchestrator := bot.NewBotMessageOrchestrator(driver, replyGateway, resolver)
+	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})

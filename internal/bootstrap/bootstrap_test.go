@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/benenen/myclaw/internal/agent"
 	"github.com/benenen/myclaw/internal/config"
 )
 
@@ -69,5 +70,11 @@ func TestBootstrapBuildsBotRuntimeWiring(t *testing.T) {
 	}
 	if app.Handler == nil {
 		t.Fatal("expected handler")
+	}
+}
+
+func TestBootstrapUsesRegisteredDriverTypeForBotCLI(t *testing.T) {
+	if _, ok := agent.LookupDriver("oneshot"); !ok {
+		t.Fatal("expected oneshot driver registration for bootstrap wiring")
 	}
 }

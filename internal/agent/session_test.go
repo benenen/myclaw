@@ -4,524 +4,502 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
-type stubDriver struct {
-	run func(context.Context, Spec, Request) (Response, error)
+type initStubDriver struct {
+	init func(context.Context, Spec) (SessionRuntime, error)
 }
 
-func (d stubDriver) Run(ctx context.Context, spec Spec, req Request) (Response, error) {
-	return d.run(ctx, spec, req)
+func (d initStubDriver) Init(ctx context.Context, spec Spec) (SessionRuntime, error) {
+	return d.init(ctx, spec)
 }
 
-func TestManagerSendDelegatesToBotSession(t *testing.T) {
-	mgr := NewManager(stubDriver{run: func(_ context.Context, _ Spec, req Request) (Response, error) {
-		return Response{Text: "reply:" + req.Prompt}, nil
-	}})
+type countingDriver struct{ id int }
 
-	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Command: "codex"}, Request{Prompt: "hello"})
+func (d countingDriver) Init(context.Context, Spec) (SessionRuntime, error) {
+	return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+		return Response{}, nil
+	}}, nil
+}
+
+type runtimeStub struct {
+	run func(context.Context, Request) (Response, error)
+}
+
+func (r runtimeStub) Run(ctx context.Context, req Request) (Response, error) {
+	return r.run(ctx, req)
+}
+
+func TestLookupDriverReturnsRegisteredFactory(t *testing.T) {
+	const name = "test-registry-driver"
+	registerTestDriver(t, name, func() Driver {
+		return initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+			return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+				return Response{}, nil
+			}}, nil
+		}}
+	})
+
+	driver, ok := LookupDriver(name)
+	if !ok {
+		t.Fatal("expected registered driver")
+	}
+	if driver == nil {
+		t.Fatal("expected non-nil driver")
+	}
+}
+
+func TestLookupDriverReturnsFreshDriverInstances(t *testing.T) {
+	const name = "test-registry-factory-driver"
+	factoryCalls := 0
+	registerTestDriver(t, name, func() Driver {
+		factoryCalls++
+		return countingDriver{id: factoryCalls}
+	})
+
+	first, ok := LookupDriver(name)
+	if !ok {
+		t.Fatal("expected first lookup to succeed")
+	}
+	second, ok := LookupDriver(name)
+	if !ok {
+		t.Fatal("expected second lookup to succeed")
+	}
+
+	firstDriver, ok := first.(countingDriver)
+	if !ok {
+		t.Fatalf("first driver type = %T", first)
+	}
+	secondDriver, ok := second.(countingDriver)
+	if !ok {
+		t.Fatalf("second driver type = %T", second)
+	}
+	if firstDriver.id == secondDriver.id {
+		t.Fatal("expected lookup to call factory for each request")
+	}
+}
+
+func TestLookupDriverReturnsFalseForUnknownDriver(t *testing.T) {
+	driver, ok := LookupDriver("test-missing-driver")
+	if ok {
+		t.Fatal("expected lookup to report missing driver")
+	}
+	if driver != nil {
+		t.Fatal("expected missing driver lookup to return nil")
+	}
+}
+
+func TestRegisterDriverRejectsDuplicateNames(t *testing.T) {
+	const name = "test-duplicate-driver"
+	factory := func() Driver {
+		return initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+			return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+				return Response{}, nil
+			}}, nil
+		}}
+	}
+
+	if err := RegisterDriver(name, factory); err != nil {
+		t.Fatalf("RegisterDriver() first error = %v", err)
+	}
+	t.Cleanup(func() { unregisterTestDriver(name) })
+
+	if err := RegisterDriver(name, factory); err == nil {
+		t.Fatal("expected duplicate registration error")
+	}
+}
+
+func TestMustRegisterDriverPanicsOnDuplicate(t *testing.T) {
+	const name = "test-must-register-duplicate-driver"
+	registerTestDriver(t, name, func() Driver {
+		return initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+			return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+				return Response{}, nil
+			}}, nil
+		}}
+	})
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic on duplicate driver registration")
+		}
+	}()
+
+	MustRegisterDriver(name, func() Driver {
+		return initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+			return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+				return Response{}, nil
+			}}, nil
+		}}
+	})
+}
+
+func TestSessionInitializesDriverOnConstruction(t *testing.T) {
+	initCalls := 0
+	var gotSpec Spec
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+		initCalls++
+		gotSpec = spec
+		return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+			return Response{Text: spec.Command + ":" + req.Prompt}, nil
+		}}, nil
+	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	if initCalls != 1 {
+		t.Fatalf("initCalls after NewSession = %d", initCalls)
+	}
+	if gotSpec.Command != "codex" {
+		t.Fatalf("init spec command = %q", gotSpec.Command)
+	}
+
+	resp, err := session.Send(context.Background(), Request{Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
-	if resp.Text != "reply:hello" {
+	if resp.Text != "codex:hello" {
 		t.Fatalf("resp.Text = %q", resp.Text)
 	}
-	if mgr.State("bot-1") != SessionStateReady {
-		t.Fatalf("State() = %s", mgr.State("bot-1"))
+	if initCalls != 1 {
+		t.Fatalf("initCalls after Send = %d", initCalls)
 	}
 }
 
-func TestManagerMarksBrokenAfterDriverError(t *testing.T) {
-	mgr := NewManager(stubDriver{run: func(context.Context, Spec, Request) (Response, error) {
-		return Response{}, errors.New("boom")
-	}})
+func TestSessionConstructionFailsWhenDriverInitFails(t *testing.T) {
+	wantErr := context.DeadlineExceeded
 
-	_, _ = mgr.Send(context.Background(), "bot-1", Spec{Command: "codex"}, Request{Prompt: "hello"})
-	if mgr.State("bot-1") != SessionStateBroken {
-		t.Fatalf("State() = %s", mgr.State("bot-1"))
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return nil, wantErr
+	}}, Spec{Command: "codex"})
+	if err == nil {
+		t.Fatal("NewSession() error = nil")
+	}
+	if session != nil {
+		t.Fatalf("session = %#v", session)
 	}
 }
 
-func TestManagerRecreatesBrokenSession(t *testing.T) {
-	var mu sync.Mutex
-	calls := 0
-	mgr := NewManager(stubDriver{run: func(_ context.Context, _ Spec, req Request) (Response, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		calls++
-		if calls == 1 {
-			return Response{}, errors.New("boom")
-		}
-		return Response{Text: "reply:" + req.Prompt}, nil
-	}})
+func TestSessionSendClonesSpecProvidedAtInit(t *testing.T) {
+	env := map[string]string{"KEY": "value"}
+	args := []string{"run"}
+	var gotSpec Spec
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+		gotSpec = spec
+		return runtimeStub{run: func(_ context.Context, _ Request) (Response, error) {
+			return Response{Text: spec.Args[0] + ":" + spec.Env["KEY"]}, nil
+		}}, nil
+	}}, Spec{Command: "codex", Args: args, Env: env})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
 
-	_, _ = mgr.Send(context.Background(), "bot-1", Spec{Command: "codex"}, Request{Prompt: "first"})
-	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Command: "codex"}, Request{Prompt: "second"})
+	args[0] = "mutated"
+	env["KEY"] = "changed"
+
+	resp, err := session.Send(context.Background(), Request{Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
-	if resp.Text != "reply:second" {
+	if resp.Text != "run:value" {
 		t.Fatalf("resp.Text = %q", resp.Text)
 	}
-	if mgr.State("bot-1") != SessionStateReady {
-		t.Fatalf("State() = %s", mgr.State("bot-1"))
+	if gotSpec.Args[0] != "run" {
+		t.Fatalf("gotSpec.Args[0] = %q", gotSpec.Args[0])
 	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 2 {
-		t.Fatalf("calls = %d", calls)
+	if gotSpec.Env["KEY"] != "value" {
+		t.Fatalf("gotSpec.Env[KEY] = %q", gotSpec.Env["KEY"])
 	}
-}
-
-func TestManagerSessionForDoesNotBlockManagerOnBusySession(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-
-	mgr := NewManager(stubDriver{run: func(_ context.Context, _ Spec, req Request) (Response, error) {
-		if req.Prompt == "first" {
-			close(started)
-			<-release
-		}
-		return Response{Text: req.Prompt}, nil
-	}})
-
-	firstDone := make(chan struct{})
-	go func() {
-		defer close(firstDone)
-		_, _ = mgr.Send(context.Background(), "bot-1", Spec{Command: "codex"}, Request{Prompt: "first"})
-	}()
-
-	<-started
-
-	tookManager := make(chan struct{})
-	go func() {
-		mgr.mu.Lock()
-		mgr.mu.Unlock()
-		close(tookManager)
-	}()
-
-	select {
-	case <-tookManager:
-	case <-firstDone:
-		t.Fatal("busy send finished before manager lock check")
-	}
-
-	close(release)
-	<-firstDone
 }
 
 func TestSessionSendSerializesConcurrentCalls(t *testing.T) {
-	firstStarted := make(chan struct{})
-	allowFirstToFinish := make(chan struct{})
-	secondStarted := make(chan struct{})
-	allowSecondToFinish := make(chan struct{})
-	finished := make(chan string, 2)
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	var concurrent int32
+	var maxConcurrent int32
 
-	session := NewSession(stubDriver{run: func(_ context.Context, _ Spec, req Request) (Response, error) {
-		switch req.Prompt {
-		case "first":
-			close(firstStarted)
-			<-allowFirstToFinish
-		case "second":
-			close(secondStarted)
-			<-allowSecondToFinish
-		default:
-			t.Fatalf("unexpected prompt %q", req.Prompt)
-		}
-		return Response{Text: req.Prompt}, nil
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+			current := atomic.AddInt32(&concurrent, 1)
+			defer atomic.AddInt32(&concurrent, -1)
+			for {
+				seen := atomic.LoadInt32(&maxConcurrent)
+				if current <= seen || atomic.CompareAndSwapInt32(&maxConcurrent, seen, current) {
+					break
+				}
+			}
+			started <- req.Prompt
+			<-release
+			return Response{Text: req.Prompt}, nil
+		}}, nil
 	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
 
-	go func() {
-		resp, err := session.Send(context.Background(), Request{Prompt: "first"})
+	var wg sync.WaitGroup
+	results := make(chan Response, 2)
+	errs := make(chan error, 2)
+	for _, prompt := range []string{"first", "second"} {
+		wg.Add(1)
+		go func(prompt string) {
+			defer wg.Done()
+			resp, err := session.Send(context.Background(), Request{Prompt: prompt})
+			results <- resp
+			errs <- err
+		}(prompt)
+	}
+
+	firstStarted := <-started
+	if firstStarted != "first" && firstStarted != "second" {
+		t.Fatalf("started prompt = %q", firstStarted)
+	}
+	if got := atomic.LoadInt32(&concurrent); got != 1 {
+		t.Fatalf("concurrent runs while first active = %d", got)
+	}
+
+	release <- struct{}{}
+	secondStarted := <-started
+	if secondStarted != "first" && secondStarted != "second" {
+		t.Fatalf("started prompt = %q", secondStarted)
+	}
+	if secondStarted == firstStarted {
+		t.Fatalf("started prompts = %q, %q", firstStarted, secondStarted)
+	}
+	release <- struct{}{}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	for err := range errs {
 		if err != nil {
-			finished <- "first-error"
-			return
+			t.Fatalf("Send() error = %v", err)
 		}
-		finished <- resp.Text
-	}()
-
-	<-firstStarted
-
-	secondReturned := make(chan struct{})
-	go func() {
-		defer close(secondReturned)
-		resp, err := session.Send(context.Background(), Request{Prompt: "second"})
-		if err != nil {
-			finished <- "second-error"
-			return
-		}
-		finished <- resp.Text
-	}()
-
-	select {
-	case <-secondStarted:
-		t.Fatal("second driver run started before first completed")
-	case <-secondReturned:
-		t.Fatal("second send returned before first completed")
-	default:
 	}
-
-	close(allowFirstToFinish)
-	if got := <-finished; got != "first" {
-		t.Fatalf("first result = %q", got)
+	if got := atomic.LoadInt32(&maxConcurrent); got != 1 {
+		t.Fatalf("max concurrent runs = %d", got)
 	}
-	<-secondStarted
-
-	close(allowSecondToFinish)
-	if got := <-finished; got != "second" {
-		t.Fatalf("second result = %q", got)
-	}
-	<-secondReturned
-
-	if session.State() != SessionStateReady {
-		t.Fatalf("State() = %s", session.State())
+	if got := session.State(); got != SessionStateReady {
+		t.Fatalf("State() after sends = %q", got)
 	}
 }
 
-func TestSessionSendUsesClonedSpecSnapshot(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
-	usedSpec := make(chan Spec, 1)
+func TestManagerReinitializesBrokenSession(t *testing.T) {
+	const driverName = "test-manager-broken-session-driver"
+	initCalls := 0
+	var runCalls int32
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+			initCalls++
+			myInit := initCalls
+			return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+				atomic.AddInt32(&runCalls, 1)
+				if myInit == 1 {
+					return Response{}, errors.New("boom")
+				}
+				return Response{Text: req.Prompt}, nil
+			}}, nil
+		}}
+	})
 
-	spec := Spec{
-		Command: "codex",
-		Args:    []string{"--fast"},
-		Env:     map[string]string{"MODE": "fast"},
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "codex"}, Request{Prompt: "one"}); err == nil {
+		t.Fatal("first Send() error = nil")
 	}
-	session := NewSession(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		close(started)
-		<-release
-		usedSpec <- spec
-		return Response{Text: spec.Command + ":" + req.Prompt}, nil
-	}}, spec)
-
-	spec.Command = "claude"
-	spec.Args[0] = "--slow"
-	spec.Env["MODE"] = "slow"
-
-	done := make(chan Response, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		resp, err := session.Send(context.Background(), Request{Prompt: "first"})
-		done <- resp
-		errCh <- err
-	}()
-
-	<-started
-	close(release)
-
-	resp := <-done
-	if err := <-errCh; err != nil {
-		t.Fatalf("Send() error = %v", err)
+	if got := mgr.State("bot-1"); got != SessionStateBroken {
+		t.Fatalf("State() after broken send = %q", got)
 	}
-	if resp.Text != "codex:first" {
+
+	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "codex"}, Request{Prompt: "two"})
+	if err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+	if resp.Text != "two" {
 		t.Fatalf("resp.Text = %q", resp.Text)
 	}
+	if initCalls != 2 {
+		t.Fatalf("initCalls = %d", initCalls)
+	}
+	if got := atomic.LoadInt32(&runCalls); got != 2 {
+		t.Fatalf("runCalls = %d", got)
+	}
+	if got := mgr.State("bot-1"); got != SessionStateReady {
+		t.Fatalf("State() after recovery = %q", got)
+	}
+}
 
-	gotSpec := <-usedSpec
-	if gotSpec.Command != "codex" {
-		t.Fatalf("driver spec command = %q", gotSpec.Command)
+func TestManagerRecreatesSessionWhenSpecChangesDuringConcurrentLookup(t *testing.T) {
+	const driverName = "test-manager-concurrent-spec-change-driver"
+	initCalls := make(chan string, 4)
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			initCalls <- spec.Command
+			ready <- struct{}{}
+			<-release
+			return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: spec.Command + ":" + req.Prompt}, nil
+			}}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	var wg sync.WaitGroup
+	responses := make(chan Response, 2)
+	errs := make(chan error, 2)
+	for _, spec := range []Spec{{Type: driverName, Command: "alpha"}, {Type: driverName, Command: "beta"}} {
+		wg.Add(1)
+		go func(spec Spec) {
+			defer wg.Done()
+			resp, err := mgr.Send(context.Background(), "bot-1", spec, Request{Prompt: "hello"})
+			responses <- resp
+			errs <- err
+		}(spec)
 	}
-	if len(gotSpec.Args) != 1 || gotSpec.Args[0] != "--fast" {
-		t.Fatalf("driver spec args = %#v", gotSpec.Args)
+
+	<-ready
+	<-ready
+	release <- struct{}{}
+	release <- struct{}{}
+	wg.Wait()
+	close(responses)
+	close(errs)
+	close(initCalls)
+
+	seenResponses := map[string]bool{}
+	for resp := range responses {
+		seenResponses[resp.Text] = true
 	}
-	if gotSpec.Env["MODE"] != "fast" {
-		t.Fatalf("driver spec env = %#v", gotSpec.Env)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Send() error = %v", err)
+		}
+	}
+	seenInits := map[string]int{}
+	for command := range initCalls {
+		seenInits[command]++
+	}
+	if seenInits["alpha"] == 0 || seenInits["beta"] == 0 {
+		t.Fatalf("init calls = %#v", seenInits)
+	}
+	if !seenResponses["alpha:hello"] || !seenResponses["beta:hello"] {
+		t.Fatalf("responses = %#v", seenResponses)
+	}
+
+	finalResp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "again"})
+	if err != nil {
+		t.Fatalf("final Send() error = %v", err)
+	}
+	if finalResp.Text != "beta:again" {
+		t.Fatalf("final resp.Text = %q", finalResp.Text)
+	}
+}
+
+func registerTestDriver(t *testing.T, name string, factory DriverFactory) {
+	t.Helper()
+	if err := RegisterDriver(name, factory); err != nil {
+		t.Fatalf("RegisterDriver() error = %v", err)
+	}
+	t.Cleanup(func() { unregisterTestDriver(name) })
+}
+
+func TestManagerUsesRegisteredDriverBySpecType(t *testing.T) {
+	const driverName = "test-manager-registry-driver"
+	initCalls := 0
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			initCalls++
+			return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: spec.Type + ":" + req.Prompt}, nil
+			}}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName}, Request{Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp.Text != driverName+":hello" {
+		t.Fatalf("resp.Text = %q", resp.Text)
+	}
+	if initCalls != 1 {
+		t.Fatalf("initCalls = %d", initCalls)
+	}
+}
+
+func TestManagerReusesSessionRuntimeForMatchingSpec(t *testing.T) {
+	const driverName = "test-manager-reuse-driver"
+	initCalls := 0
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			initCalls++
+			return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: spec.Type + ":" + req.Prompt}, nil
+			}}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	for _, prompt := range []string{"one", "two"} {
+		if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "codex"}, Request{Prompt: prompt}); err != nil {
+			t.Fatalf("Send(%q) error = %v", prompt, err)
+		}
+	}
+	if initCalls != 1 {
+		t.Fatalf("initCalls = %d", initCalls)
 	}
 }
 
 func TestManagerRecreatesSessionWhenSpecChanges(t *testing.T) {
-	var (
-		mu    sync.Mutex
-		specs []Spec
-	)
-	mgr := NewManager(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		mu.Lock()
-		specs = append(specs, spec)
-		mu.Unlock()
-		return Response{Text: spec.Command + ":" + req.Prompt}, nil
-	}})
+	const driverName = "test-manager-recreate-driver"
+	initCalls := 0
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			initCalls++
+			return runtimeStub{run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: spec.Command + ":" + req.Prompt}, nil
+			}}, nil
+		}}
+	})
 
-	firstSpec := Spec{Command: "codex", Args: []string{"--fast"}}
-	secondSpec := Spec{Command: "claude", Args: []string{"--slow"}}
-
-	firstResp, err := mgr.Send(context.Background(), "bot-1", firstSpec, Request{Prompt: "one"})
-	if err != nil {
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "codex"}, Request{Prompt: "one"}); err != nil {
 		t.Fatalf("first Send() error = %v", err)
 	}
-	secondResp, err := mgr.Send(context.Background(), "bot-1", secondSpec, Request{Prompt: "two"})
+	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "claude"}, Request{Prompt: "two"})
 	if err != nil {
 		t.Fatalf("second Send() error = %v", err)
 	}
-
-	if firstResp.Text != "codex:one" {
-		t.Fatalf("firstResp.Text = %q", firstResp.Text)
+	if resp.Text != "claude:two" {
+		t.Fatalf("resp.Text = %q", resp.Text)
 	}
-	if secondResp.Text != "claude:two" {
-		t.Fatalf("secondResp.Text = %q", secondResp.Text)
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(specs) != 2 {
-		t.Fatalf("len(specs) = %d", len(specs))
-	}
-	if specs[0].Command != "codex" || specs[1].Command != "claude" {
-		t.Fatalf("specs = %#v", specs)
+	if initCalls != 2 {
+		t.Fatalf("initCalls = %d", initCalls)
 	}
 }
 
-func TestManagerSpecReplacementCreatesNewSessionForInFlightSend(t *testing.T) {
-	started := make(chan struct{})
-	release := make(chan struct{})
+func TestManagerReturnsErrorForUnknownDriverType(t *testing.T) {
+	mgr := NewManager()
 
-	mgr := NewManager(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		if req.Prompt == "first" {
-			close(started)
-			<-release
-		}
-		return Response{Text: spec.Command + ":" + req.Prompt}, nil
-	}})
-
-	firstSpec := Spec{Command: "codex"}
-	secondSpec := Spec{Command: "claude"}
-
-	firstDone := make(chan struct{})
-	go func() {
-		defer close(firstDone)
-		resp, err := mgr.Send(context.Background(), "bot-1", firstSpec, Request{Prompt: "first"})
-		if err != nil {
-			t.Errorf("first Send() error = %v", err)
-			return
-		}
-		if resp.Text != "codex:first" {
-			t.Errorf("first resp.Text = %q", resp.Text)
-		}
-	}()
-
-	<-started
-
-	resp, err := mgr.Send(context.Background(), "bot-1", secondSpec, Request{Prompt: "second"})
-	if err != nil {
-		t.Fatalf("replacement Send() error = %v", err)
+	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: "test-missing-driver"}, Request{Prompt: "hello"})
+	if err == nil {
+		t.Fatal("Send() error = nil")
 	}
-	if resp.Text != "claude:second" {
-		t.Fatalf("replacement resp.Text = %q", resp.Text)
+	if resp != (Response{}) {
+		t.Fatalf("resp = %#v", resp)
 	}
-	if mgr.State("bot-1") != SessionStateReady {
-		t.Fatalf("State() = %s", mgr.State("bot-1"))
-	}
-
-	close(release)
-	<-firstDone
-}
-
-func TestManagerRetriesAfterBrokenSessionWithoutTimingFlakes(t *testing.T) {
-	allowFailureReturn := make(chan struct{})
-	startedFailure := make(chan struct{})
-	failed := make(chan struct{})
-	var mu sync.Mutex
-	calls := 0
-
-	mgr := NewManager(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		mu.Lock()
-		calls++
-		callNumber := calls
-		mu.Unlock()
-
-		if callNumber == 1 {
-			close(startedFailure)
-			<-allowFailureReturn
-			return Response{}, errors.New("boom")
-		}
-		return Response{Text: spec.Command + ":" + req.Prompt}, nil
-	}})
-
-	spec := Spec{Command: "codex"}
-	go func() {
-		defer close(failed)
-		_, _ = mgr.Send(context.Background(), "bot-1", spec, Request{Prompt: "first"})
-	}()
-
-	<-startedFailure
-	if mgr.State("bot-1") != SessionStateBusy {
-		t.Fatalf("State() before failure = %s", mgr.State("bot-1"))
-	}
-
-	close(allowFailureReturn)
-	<-failed
-	if mgr.State("bot-1") != SessionStateBroken {
-		t.Fatalf("State() after failure = %s", mgr.State("bot-1"))
-	}
-
-	resp, err := mgr.Send(context.Background(), "bot-1", spec, Request{Prompt: "second"})
-	if err != nil {
-		t.Fatalf("retry Send() error = %v", err)
-	}
-	if resp.Text != "codex:second" {
-		t.Fatalf("retry resp.Text = %q", resp.Text)
-	}
-	if mgr.State("bot-1") != SessionStateReady {
-		t.Fatalf("State() after retry = %s", mgr.State("bot-1"))
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 2 {
-		t.Fatalf("calls = %d", calls)
+	if got := mgr.State("bot-1"); got != SessionStateStopped {
+		t.Fatalf("State() = %q", got)
 	}
 }
 
-func TestManagerConcurrentRetriesReuseSingleReplacementAfterBrokenSession(t *testing.T) {
-	var (
-		mu             sync.Mutex
-		calls          int
-		successStarted = make(chan struct{})
-		releaseSuccess = make(chan struct{})
-	)
-
-	mgr := NewManager(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		mu.Lock()
-		calls++
-		callNumber := calls
-		mu.Unlock()
-
-		switch callNumber {
-		case 1:
-			return Response{}, errors.New("boom")
-		case 2:
-			close(successStarted)
-			<-releaseSuccess
-			return Response{Text: spec.Command + ":" + req.Prompt}, nil
-		default:
-			return Response{Text: spec.Command + ":" + req.Prompt}, nil
-		}
-	}})
-
-	spec := Spec{Command: "codex"}
-	_, _ = mgr.Send(context.Background(), "bot-1", spec, Request{Prompt: "first"})
-	if mgr.State("bot-1") != SessionStateBroken {
-		t.Fatalf("State() after failure = %s", mgr.State("bot-1"))
-	}
-
-	results := make(chan result, 2)
-
-	for _, prompt := range []string{"second", "third"} {
-		go func(prompt string) {
-			resp, err := mgr.Send(context.Background(), "bot-1", spec, Request{Prompt: prompt})
-			results <- result{resp: resp, err: err}
-		}(prompt)
-	}
-
-	<-successStarted
-
-	mu.Lock()
-	if calls != 2 {
-		mu.Unlock()
-		t.Fatalf("calls while replacement busy = %d", calls)
-	}
-	mu.Unlock()
-
-	close(releaseSuccess)
-
-	for i := 0; i < 2; i++ {
-		got := <-results
-		if got.err != nil {
-			t.Fatalf("concurrent retry error = %v", got.err)
-		}
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 3 {
-		t.Fatalf("calls after concurrent retries = %d", calls)
-	}
-}
-
-func TestManagerMixedSpecOverlapReusesLatestSession(t *testing.T) {
-	var (
-		mu         sync.Mutex
-		calls      int
-		oldStarted = make(chan struct{})
-		releaseOld = make(chan struct{})
-		newStarted = make(chan struct{})
-		releaseNew = make(chan struct{})
-	)
-
-	mgr := NewManager(stubDriver{run: func(_ context.Context, spec Spec, req Request) (Response, error) {
-		mu.Lock()
-		calls++
-		callNumber := calls
-		mu.Unlock()
-
-		switch {
-		case spec.Command == "codex":
-			close(oldStarted)
-			<-releaseOld
-		case spec.Command == "claude" && callNumber == 2:
-			close(newStarted)
-			<-releaseNew
-		}
-		return Response{Text: spec.Command + ":" + req.Prompt}, nil
-	}})
-
-	oldSpec := Spec{Command: "codex"}
-	newSpec := Spec{Command: "claude"}
-
-	oldDone := make(chan struct{})
-	go func() {
-		defer close(oldDone)
-		_, _ = mgr.Send(context.Background(), "bot-1", oldSpec, Request{Prompt: "old"})
-	}()
-
-	<-oldStarted
-
-	newResults := make(chan result, 2)
-	for _, prompt := range []string{"new-1", "new-2"} {
-		go func(prompt string) {
-			resp, err := mgr.Send(context.Background(), "bot-1", newSpec, Request{Prompt: prompt})
-			newResults <- result{resp: resp, err: err}
-		}(prompt)
-	}
-
-	<-newStarted
-
-	mu.Lock()
-	if calls != 2 {
-		mu.Unlock()
-		t.Fatalf("calls while latest session busy = %d", calls)
-	}
-	mu.Unlock()
-
-	close(releaseNew)
-	close(releaseOld)
-	<-oldDone
-
-	seen := map[string]bool{}
-	for i := 0; i < 2; i++ {
-		got := <-newResults
-		if got.err != nil {
-			t.Fatalf("new spec send error = %v", got.err)
-		}
-		seen[got.resp.Text] = true
-	}
-	if !seen["claude:new-1"] || !seen["claude:new-2"] {
-		t.Fatalf("new spec responses = %#v", seen)
-	}
-	if mgr.State("bot-1") != SessionStateReady {
-		t.Fatalf("State() after mixed-spec overlap = %s", mgr.State("bot-1"))
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	if calls != 3 {
-		t.Fatalf("calls after mixed-spec overlap = %d", calls)
-	}
-}
-
-type result struct {
-	resp Response
-	err  error
+func unregisterTestDriver(name string) {
+	driversMu.Lock()
+	defer driversMu.Unlock()
+	delete(drivers, name)
 }

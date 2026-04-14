@@ -8,14 +8,27 @@ import (
 	"time"
 )
 
-func TestOneshotDriverRunSuccess(t *testing.T) {
-	driver := NewOneshotDriver()
+func TestOneshotDriverRegistersInRegistry(t *testing.T) {
+	driver, ok := LookupDriver("oneshot")
+	if !ok {
+		t.Fatal("expected oneshot driver registration")
+	}
+	if driver == nil {
+		t.Fatal("expected non-nil oneshot driver")
+	}
+}
 
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotDriverInitReturnsRuntimeThatRunsRequests(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "cat"},
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "hello"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -33,14 +46,17 @@ func TestOneshotDriverRunSuccess(t *testing.T) {
 	}
 }
 
-func TestOneshotDriverRunFailureIncludesExitCodeAndRawOutput(t *testing.T) {
-	driver := NewOneshotDriver()
-
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotRuntimeRunFailureIncludesExitCodeAndRawOutput(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "printf 'out'; printf 'err' >&2; exit 7"},
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if err == nil {
 		t.Fatal("Run() error = nil")
 	}
@@ -55,14 +71,17 @@ func TestOneshotDriverRunFailureIncludesExitCodeAndRawOutput(t *testing.T) {
 	}
 }
 
-func TestOneshotDriverRunFailureWithStderrOnlyDoesNotPrefixNewline(t *testing.T) {
-	driver := NewOneshotDriver()
-
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotRuntimeRunFailureWithStderrOnlyDoesNotPrefixNewline(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "printf 'err' >&2; exit 9"},
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if err == nil {
 		t.Fatal("Run() error = nil")
 	}
@@ -77,14 +96,17 @@ func TestOneshotDriverRunFailureWithStderrOnlyDoesNotPrefixNewline(t *testing.T)
 	}
 }
 
-func TestOneshotDriverRunNormalizesLineEndingsWithoutTrimmingSpaces(t *testing.T) {
-	driver := NewOneshotDriver()
-
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotRuntimeRunNormalizesLineEndingsWithoutTrimmingSpaces(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "printf '  hello  \r\n'; printf '  warn  \r\n' >&2"},
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -99,17 +121,20 @@ func TestOneshotDriverRunNormalizesLineEndingsWithoutTrimmingSpaces(t *testing.T
 	}
 }
 
-func TestOneshotDriverRunPassesEnv(t *testing.T) {
-	driver := NewOneshotDriver()
-
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotRuntimeRunPassesEnv(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "printf '%s' \"$SPECIAL_VALUE\""},
 		Env: map[string]string{
 			"SPECIAL_VALUE": "from-spec-env",
 		},
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -121,16 +146,19 @@ func TestOneshotDriverRunPassesEnv(t *testing.T) {
 	}
 }
 
-func TestOneshotDriverRunUsesWorkDir(t *testing.T) {
-	driver := NewOneshotDriver()
+func TestOneshotRuntimeRunUsesWorkDir(t *testing.T) {
 	workDir := t.TempDir()
-
-	resp, err := driver.Run(context.Background(), Spec{
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "pwd"},
 		WorkDir: workDir,
 		Timeout: 2 * time.Second,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -142,14 +170,17 @@ func TestOneshotDriverRunUsesWorkDir(t *testing.T) {
 	}
 }
 
-func TestOneshotDriverRunTimeout(t *testing.T) {
-	driver := NewOneshotDriver()
-
-	resp, err := driver.Run(context.Background(), Spec{
+func TestOneshotRuntimeRunTimeout(t *testing.T) {
+	runtime, err := NewOneshotDriver().Init(context.Background(), Spec{
 		Command: "sh",
 		Args:    []string{"-c", "sleep 2"},
 		Timeout: 100 * time.Millisecond,
-	}, Request{Prompt: "ignored"})
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+
+	resp, err := runtime.Run(context.Background(), Request{Prompt: "ignored"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Run() error = %v", err)
 	}

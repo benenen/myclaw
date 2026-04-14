@@ -6,23 +6,24 @@ import (
 	"sync"
 )
 
-type Driver interface {
-	Run(ctx context.Context, spec Spec, req Request) (Response, error)
-}
-
 type Session struct {
-	mu     sync.Mutex
-	state  SessionState
-	driver Driver
-	spec   Spec
+	mu      sync.Mutex
+	state   SessionState
+	runtime SessionRuntime
+	spec    Spec
 }
 
-func NewSession(driver Driver, spec Spec) *Session {
-	return &Session{
-		state:  SessionStateReady,
-		driver: driver,
-		spec:   cloneSpec(spec),
+func NewSession(ctx context.Context, driver Driver, spec Spec) (*Session, error) {
+	clonedSpec := cloneSpec(spec)
+	runtime, err := driver.Init(ctx, clonedSpec)
+	if err != nil {
+		return nil, err
 	}
+	return &Session{
+		state:   SessionStateReady,
+		runtime: runtime,
+		spec:    clonedSpec,
+	}, nil
 }
 
 func (s *Session) State() SessionState {
@@ -33,14 +34,10 @@ func (s *Session) State() SessionState {
 
 func (s *Session) Send(ctx context.Context, req Request) (Response, error) {
 	s.mu.Lock()
-	s.state = SessionStateBusy
-	spec := cloneSpec(s.spec)
-	s.mu.Unlock()
-
-	resp, err := s.driver.Run(ctx, spec, req)
-
-	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.state = SessionStateBusy
+	resp, err := s.runtime.Run(ctx, req)
 	if err != nil {
 		s.state = SessionStateBroken
 		return resp, err

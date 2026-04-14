@@ -10,23 +10,37 @@ import (
 
 type OneshotDriver struct{}
 
+type OneshotRuntime struct {
+	spec Spec
+}
+
+func init() {
+	MustRegisterDriver("oneshot", func() Driver {
+		return NewOneshotDriver()
+	})
+}
+
 func NewOneshotDriver() *OneshotDriver {
 	return &OneshotDriver{}
 }
 
-func (d *OneshotDriver) Run(ctx context.Context, spec Spec, req Request) (Response, error) {
+func (d *OneshotDriver) Init(_ context.Context, spec Spec) (SessionRuntime, error) {
+	return &OneshotRuntime{spec: cloneSpec(spec)}, nil
+}
+
+func (r *OneshotRuntime) Run(ctx context.Context, req Request) (Response, error) {
 	runCtx := ctx
 	cancel := func() {}
-	if spec.Timeout > 0 {
-		runCtx, cancel = context.WithTimeout(ctx, spec.Timeout)
+	if r.spec.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, r.spec.Timeout)
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, spec.Command, spec.Args...)
-	if spec.WorkDir != "" {
-		cmd.Dir = spec.WorkDir
+	cmd := exec.CommandContext(runCtx, r.spec.Command, r.spec.Args...)
+	if r.spec.WorkDir != "" {
+		cmd.Dir = r.spec.WorkDir
 	}
-	if env := flattenEnv(spec.Env); len(env) > 0 {
+	if env := flattenEnv(r.spec.Env); len(env) > 0 {
 		cmd.Env = append(cmd.Environ(), env...)
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)

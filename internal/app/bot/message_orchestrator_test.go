@@ -24,7 +24,7 @@ func TestOrchestratorProcessesSameBotSequentially(t *testing.T) {
 	var once sync.Once
 	var completed sync.WaitGroup
 	completed.Add(2)
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		mu.Lock()
 		order = append(order, req.MessageID)
 		mu.Unlock()
@@ -73,7 +73,7 @@ func TestOrchestratorProcessesDifferentBotsConcurrently(t *testing.T) {
 	done := make(chan struct{})
 	var completed sync.WaitGroup
 	completed.Add(2)
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		started <- req.BotID
 		<-release
 		completed.Done()
@@ -114,7 +114,7 @@ func TestOrchestratorDedupesMessageIDPerBot(t *testing.T) {
 	var mu sync.Mutex
 	var calls []string
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		mu.Lock()
 		calls = append(calls, req.MessageID)
 		mu.Unlock()
@@ -145,7 +145,7 @@ func TestOrchestratorDoesNotDedupeEmptyMessageIDPerBot(t *testing.T) {
 	done := make(chan struct{})
 	processed := make(chan struct{}, 2)
 	var once sync.Once
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		mu.Lock()
 		calls = append(calls, req.Prompt)
 		mu.Unlock()
@@ -196,7 +196,7 @@ func TestOrchestratorDedupesConcurrentDuplicateMessageIDPerBot(t *testing.T) {
 	var sendCount int
 	var sendMu sync.Mutex
 	var handlers sync.WaitGroup
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		sendMu.Lock()
 		sendCount++
 		sendMu.Unlock()
@@ -238,7 +238,7 @@ func TestOrchestratorDedupesConcurrentDuplicateMessageIDPerBot(t *testing.T) {
 
 func TestOrchestratorCleansExpiredSeenMessages(t *testing.T) {
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		close(done)
 		return agent.Response{Text: req.Prompt}, nil
 	}}
@@ -279,7 +279,7 @@ func TestOrchestratorUsesConfiguredMessageContext(t *testing.T) {
 
 	parent := context.WithValue(context.Background(), key, "value")
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(ctx context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		if got := ctx.Value(key); got != "value" {
 			t.Fatalf("context value = %#v", got)
 		}
@@ -300,7 +300,7 @@ func TestOrchestratorUsesConfiguredMessageContext(t *testing.T) {
 
 func TestOrchestratorUsesReplyTargetForReplies(t *testing.T) {
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		return agent.Response{Text: "ok"}, nil
 	}}
 	gateway := fakeReplyGateway{reply: func(_ context.Context, target channel.ReplyTarget, resp agent.Response) error {
@@ -343,7 +343,7 @@ func TestOrchestratorUsesReplyTargetForReplies(t *testing.T) {
 
 func TestOrchestratorFallsBackToFromWhenReplyTargetMissing(t *testing.T) {
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		return agent.Response{Text: "ok"}, nil
 	}}
 	gateway := fakeReplyGateway{reply: func(_ context.Context, target channel.ReplyTarget, _ agent.Response) error {
@@ -365,7 +365,7 @@ func TestOrchestratorFallsBackToFromWhenReplyTargetMissing(t *testing.T) {
 
 func TestOrchestratorHandleEventForwardsRuntimeEvent(t *testing.T) {
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.UserID != "wxid_sender" || req.MessageID != "m1" || req.Prompt != "hello" {
 			t.Fatalf("request = %#v", req)
 		}
@@ -405,7 +405,7 @@ func TestOrchestratorHandleEventForwardsRuntimeEvent(t *testing.T) {
 }
 
 func TestOrchestratorSkipsEmptyRuntimeEventText(t *testing.T) {
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(context.Context, agent.Spec, agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
 		t.Fatal("expected empty event to skip agent send")
 		return agent.Response{}, nil
 	}}, fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error {
@@ -417,7 +417,7 @@ func TestOrchestratorSkipsEmptyRuntimeEventText(t *testing.T) {
 }
 
 func TestOrchestratorSkipsDuplicateRuntimeEventMessageID(t *testing.T) {
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(context.Context, agent.Spec, agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
 		t.Fatal("expected duplicate event to skip agent send")
 		return agent.Response{}, nil
 	}}, fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}, fakeResolver{})
@@ -442,7 +442,7 @@ func TestOrchestratorSkipsDuplicateRuntimeEventMessageID(t *testing.T) {
 }
 
 func TestOrchestratorSkipsDuplicateInProgressRuntimeEventMessageID(t *testing.T) {
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(context.Context, agent.Spec, agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
 		t.Fatal("expected in-progress duplicate event to skip agent send")
 		return agent.Response{}, nil
 	}}, fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}, fakeResolver{})
@@ -472,7 +472,7 @@ func TestOrchestratorRepliesBusyWhenQueueFull(t *testing.T) {
 	gated := make(chan struct{})
 	repliedBusy := make(chan struct{})
 	var once sync.Once
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.MessageID == "m1" {
 			close(started)
 			<-release
@@ -528,7 +528,7 @@ func TestOrchestratorProcessesRetriedMessageIDAfterBusyReject(t *testing.T) {
 	var processed sync.Mutex
 	processedIDs := make([]string, 0, 2)
 
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		processed.Lock()
 		processedIDs = append(processedIDs, req.MessageID)
 		processed.Unlock()
@@ -584,7 +584,7 @@ func TestOrchestratorProcessesRetriedMessageIDAfterBusyReject(t *testing.T) {
 func TestOrchestratorRepliesTimeoutWhenAgentTimesOut(t *testing.T) {
 	done := make(chan struct{})
 	gateway := &recordingReplyGateway{done: done}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		return agent.Response{}, context.DeadlineExceeded
 	}}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{})
@@ -607,7 +607,7 @@ func TestOrchestratorRepliesTimeoutWhenAgentTimesOut(t *testing.T) {
 func TestOrchestratorRepliesTimeoutWhenAgentContextCanceled(t *testing.T) {
 	done := make(chan struct{})
 	gateway := &recordingReplyGateway{done: done}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		return agent.Response{}, context.Canceled
 	}}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{})
@@ -629,7 +629,7 @@ func TestOrchestratorRepliesTimeoutWhenAgentContextCanceled(t *testing.T) {
 
 func TestOrchestratorSkipsWorkerCreationForDuplicateMessageID(t *testing.T) {
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(context.Context, agent.Spec, agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
 		t.Fatal("expected duplicate to skip agent send")
 		return agent.Response{}, nil
 	}}, gateway, fakeResolver{})
@@ -655,7 +655,7 @@ func TestOrchestratorSkipsWorkerCreationForDuplicateMessageID(t *testing.T) {
 
 func TestOrchestratorSkipsWorkerCreationForDuplicateInProgressMessageID(t *testing.T) {
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(context.Context, agent.Spec, agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
 		t.Fatal("expected in-progress duplicate to skip agent send")
 		return agent.Response{}, nil
 	}}, gateway, fakeResolver{})
@@ -682,7 +682,7 @@ func TestOrchestratorSkipsWorkerCreationForDuplicateInProgressMessageID(t *testi
 func TestOrchestratorCreatesWorkerAndProcessesFirstMessage(t *testing.T) {
 	processed := make(chan struct{})
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
-	orchestrator := NewBotMessageOrchestrator(&fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	orchestrator := NewBotMessageOrchestrator(&fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.MessageID != "m1" {
 			t.Fatalf("messageID = %q", req.MessageID)
 		}
@@ -721,7 +721,7 @@ func TestOrchestratorCreatesWorkerAndProcessesFirstMessage(t *testing.T) {
 
 func TestOrchestratorReclaimsBotStateAfterQueueDrains(t *testing.T) {
 	done := make(chan struct{})
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.MessageID == "m2" {
 			close(done)
 		}
@@ -768,7 +768,7 @@ func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 	secondStarted := make(chan struct{})
 	busyReplySent := make(chan struct{})
 	var busyOnce sync.Once
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		switch req.MessageID {
 		case "m1":
 			close(started)
@@ -814,7 +814,7 @@ func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 func TestOrchestratorRepliesFailureWhenAgentFails(t *testing.T) {
 	done := make(chan struct{})
 	gateway := &recordingReplyGateway{done: done}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		return agent.Response{}, errors.New("boom")
 	}}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{})
@@ -838,7 +838,7 @@ func TestOrchestratorRetriesSameMessageIDAfterFailure(t *testing.T) {
 	processed := make(chan string, 2)
 	var attempts sync.Mutex
 	attemptByID := map[string]int{}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		attempts.Lock()
 		attemptByID[req.MessageID]++
 		attempt := attemptByID[req.MessageID]
@@ -905,7 +905,7 @@ func TestOrchestratorHoldsDuplicateUntilFailureReplyCompletes(t *testing.T) {
 	var replyOnce sync.Once
 	var attempts sync.Mutex
 	attemptByID := map[string]int{}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		attempts.Lock()
 		attemptByID[req.MessageID]++
 		attempt := attemptByID[req.MessageID]
@@ -977,7 +977,7 @@ func TestOrchestratorRetriesSameMessageIDAfterTimeout(t *testing.T) {
 	processed := make(chan string, 2)
 	var attempts sync.Mutex
 	attemptByID := map[string]int{}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		attempts.Lock()
 		attemptByID[req.MessageID]++
 		attempt := attemptByID[req.MessageID]
@@ -1028,7 +1028,7 @@ func TestOrchestratorReclaimsAfterStuckSendTimeout(t *testing.T) {
 	repliesDone := make(chan struct{})
 	var once sync.Once
 	var startedOnce sync.Once
-	mgr := &fakeDriver{run: func(ctx context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.MessageID == "stuck" {
 			startedOnce.Do(func() { close(started) })
 			<-ctx.Done()
@@ -1074,7 +1074,7 @@ func TestOrchestratorReclaimsAfterStuckSendTimeout(t *testing.T) {
 	}
 
 	processed := make(chan string, 1)
-	mgr.run = func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr.send = func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		processed <- req.MessageID
 		return agent.Response{Text: req.Prompt}, nil
 	}
@@ -1098,7 +1098,7 @@ func TestOrchestratorReclaimsAfterStuckReplyTimeout(t *testing.T) {
 	sendProcessed := make(chan struct{})
 	replyStarted := make(chan struct{})
 	var sendOnce sync.Once
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		sendOnce.Do(func() { close(sendProcessed) })
 		return agent.Response{Text: "ok"}, nil
 	}}
@@ -1143,7 +1143,7 @@ func TestOrchestratorReclaimsAfterStuckReplyTimeout(t *testing.T) {
 	}
 
 	processed := make(chan string, 1)
-	mgr.run = func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr.send = func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		processed <- req.MessageID
 		return agent.Response{Text: req.Prompt}, nil
 	}
@@ -1165,7 +1165,7 @@ func TestOrchestratorReclaimsAfterStuckReplyTimeout(t *testing.T) {
 
 func TestOrchestratorRepliesSuccessfulSendNearDeadline(t *testing.T) {
 	replyDone := make(chan struct{})
-	mgr := &fakeDriver{run: func(ctx context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		deadline, ok := ctx.Deadline()
 		if !ok {
 			t.Fatal("expected processing deadline")
@@ -1205,7 +1205,7 @@ func TestOrchestratorRepliesSuccessfulSendNearDeadline(t *testing.T) {
 func TestOrchestratorGivesTimeoutReplyFreshWindowAfterProcessingExpiry(t *testing.T) {
 	replyDone := make(chan struct{})
 	replyObserved := make(chan time.Duration, 1)
-	mgr := &fakeDriver{run: func(ctx context.Context, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
 		<-ctx.Done()
 		return agent.Response{}, ctx.Err()
 	}}
@@ -1256,7 +1256,7 @@ func TestOrchestratorMarksMessageSeenAfterSuccessfulRetry(t *testing.T) {
 	processed := make(chan string, 3)
 	var attempts sync.Mutex
 	attemptByID := map[string]int{}
-	mgr := &fakeDriver{run: func(_ context.Context, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		attempts.Lock()
 		attemptByID[req.MessageID]++
 		attempt := attemptByID[req.MessageID]
@@ -1326,12 +1326,12 @@ func TestOrchestratorMarksMessageSeenAfterSuccessfulRetry(t *testing.T) {
 	}
 }
 
-type fakeDriver struct {
-	run func(ctx context.Context, spec agent.Spec, req agent.Request) (agent.Response, error)
+type fakeExecutor struct {
+	send func(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error)
 }
 
-func (m *fakeDriver) Run(ctx context.Context, spec agent.Spec, req agent.Request) (agent.Response, error) {
-	return m.run(ctx, spec, req)
+func (m *fakeExecutor) Send(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error) {
+	return m.send(ctx, botID, spec, req)
 }
 
 type fakeResolver struct {
