@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/benenen/myclaw/internal/agent"
+	_ "github.com/benenen/myclaw/internal/agent/codex"
 	"github.com/benenen/myclaw/internal/config"
 )
 
@@ -74,7 +75,10 @@ func TestBootstrapBuildsBotRuntimeWiring(t *testing.T) {
 }
 
 func TestBootstrapUsesRegisteredDriverTypeForBotCLI(t *testing.T) {
-	if _, ok := agent.LookupDriver("oneshot"); !ok {
-		t.Fatal("expected oneshot driver registration for bootstrap wiring")
+	if _, ok := agent.LookupDriver("codex-pty"); !ok {
+		t.Fatal("expected codex-pty driver registration for bootstrap wiring")
+	}
+	if _, ok := agent.LookupDriver("oneshot"); ok {
+		t.Fatal("did not expect legacy oneshot driver registration in bootstrap wiring")
 	}
 }
