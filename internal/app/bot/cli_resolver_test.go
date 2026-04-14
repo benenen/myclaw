@@ -14,14 +14,14 @@ func TestBotCLIResolverResolveReturnsConfigForConfiguredAvailableCapability(t *t
 	bots := newBotRepoStub(domain.Bot{
 		ID:                "bot_1",
 		AgentCapabilityID: "cap_codex",
-		AgentMode:         "oneshot",
+		AgentMode:         "codex-exec",
 	})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_codex": {
 			ID:             "cap_codex",
 			Command:        "/usr/local/bin/codex",
 			Args:           []string{"reply", "--plain"},
-			SupportedModes: []string{"oneshot", "session"},
+			SupportedModes: []string{"codex-exec", "session"},
 			Available:      true,
 		},
 	}}
@@ -31,7 +31,7 @@ func TestBotCLIResolverResolveReturnsConfigForConfiguredAvailableCapability(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.Type != "oneshot" {
+	if spec.Type != "codex-exec" {
 		t.Fatalf("unexpected type: %q", spec.Type)
 	}
 	if spec.Command != "/usr/local/bin/codex" {
@@ -50,6 +50,34 @@ func TestBotCLIResolverResolveReturnsConfigForConfiguredAvailableCapability(t *t
 	}
 }
 
+func TestBotCLIResolverResolveUsesDedicatedCodexExecTimeout(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_1",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {
+			ID:             "cap_codex",
+			Command:        "/usr/local/bin/codex",
+			SupportedModes: []string{"codex-exec"},
+			Available:      true,
+		},
+	}}
+	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+		Timeout:          45 * time.Second,
+		CodexExecTimeout: 5 * time.Minute,
+	})
+
+	spec, err := resolver.Resolve(context.Background(), "bot_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Timeout != 5*time.Minute {
+		t.Fatalf("unexpected timeout: %s", spec.Timeout)
+	}
+}
+
 func TestBotCLIResolverResolveReturnsConfigMissingWhenCapabilityMissing(t *testing.T) {
 	resolver := NewBotCLIResolver(newBotRepoStub(domain.Bot{ID: "bot_1"}), &agentCapabilityRepoStub{}, BotCLIResolverConfig{})
 
@@ -60,9 +88,9 @@ func TestBotCLIResolverResolveReturnsConfigMissingWhenCapabilityMissing(t *testi
 }
 
 func TestBotCLIResolverResolveReturnsUnavailableWhenCapabilityUnavailable(t *testing.T) {
-	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_claude", AgentMode: "oneshot"})
+	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_claude", AgentMode: "codex-exec"})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
-		"cap_claude": {ID: "cap_claude", Available: false, SupportedModes: []string{"oneshot"}},
+		"cap_claude": {ID: "cap_claude", Available: false, SupportedModes: []string{"codex-exec"}},
 	}}
 	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
 
@@ -75,7 +103,7 @@ func TestBotCLIResolverResolveReturnsUnavailableWhenCapabilityUnavailable(t *tes
 func TestBotCLIResolverResolveReturnsUnsupportedModeWhenCapabilityDoesNotSupportBotMode(t *testing.T) {
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_claude", AgentMode: "session"})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
-		"cap_claude": {ID: "cap_claude", Available: true, SupportedModes: []string{"oneshot"}},
+		"cap_claude": {ID: "cap_claude", Available: true, SupportedModes: []string{"codex-exec"}},
 	}}
 	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
 
@@ -86,7 +114,7 @@ func TestBotCLIResolverResolveReturnsUnsupportedModeWhenCapabilityDoesNotSupport
 }
 
 func TestBotCLIResolverResolveReturnsCapabilityLookupError(t *testing.T) {
-	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_codex", AgentMode: "oneshot"})
+	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_codex", AgentMode: "codex-exec"})
 	capabilities := &agentCapabilityRepoStub{getByIDErr: errors.New("lookup failed")}
 	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
 

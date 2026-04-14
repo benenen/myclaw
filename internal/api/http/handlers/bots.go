@@ -204,8 +204,8 @@ func SimulateBotMessage(svc MessageSimulator) stdhttp.HandlerFunc {
 			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "invalid request body")
 			return
 		}
-		if strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.From) == "" || strings.TrimSpace(req.Text) == "" {
-			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "bot_id, from and text are required")
+		if strings.TrimSpace(req.BotID) == "" || strings.TrimSpace(req.From) == "" || strings.TrimSpace(req.RecipientID) == "" || strings.TrimSpace(req.Text) == "" {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "bot_id, from, recipient_id and text are required")
 			return
 		}
 		if svc == nil {

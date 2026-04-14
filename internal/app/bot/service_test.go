@@ -13,6 +13,12 @@ import (
 	"github.com/benenen/myclaw/internal/testutil"
 )
 
+type capabilityDiscovererFunc func(ctx context.Context) error
+
+func (f capabilityDiscovererFunc) Refresh(ctx context.Context) ([]domain.AgentCapability, error) {
+	return nil, f(ctx)
+}
+
 type failingRuntimeStarter struct{}
 
 func (failingRuntimeStarter) StartRuntime(context.Context, channel.StartRuntimeRequest) (channel.RuntimeHandle, error) {
@@ -295,9 +301,9 @@ func TestBotServiceConfigureBotAgent(t *testing.T) {
 	}
 
 	updated, err := svc.ConfigureBotAgent(context.Background(), ConfigureBotAgentInput{
-		BotID:              created.BotID,
-		AgentCapabilityID:  "cap_codex",
-		AgentMode:          "oneshot",
+		BotID:             created.BotID,
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +314,7 @@ func TestBotServiceConfigureBotAgent(t *testing.T) {
 	if updated.AgentCapabilityID != "cap_codex" {
 		t.Fatalf("unexpected agent capability id: %s", updated.AgentCapabilityID)
 	}
-	if updated.AgentMode != "oneshot" {
+	if updated.AgentMode != "codex-exec" {
 		t.Fatalf("unexpected agent mode: %s", updated.AgentMode)
 	}
 
@@ -319,7 +325,7 @@ func TestBotServiceConfigureBotAgent(t *testing.T) {
 	if stored.AgentCapabilityID != "cap_codex" {
 		t.Fatalf("unexpected stored agent capability id: %s", stored.AgentCapabilityID)
 	}
-	if stored.AgentMode != "oneshot" {
+	if stored.AgentMode != "codex-exec" {
 		t.Fatalf("unexpected stored agent mode: %s", stored.AgentMode)
 	}
 }
@@ -344,7 +350,7 @@ func TestBotServiceListAgentCapabilities(t *testing.T) {
 		Label:          "Claude",
 		Command:        "claude",
 		Args:           []string{"--print"},
-		SupportedModes: []string{"oneshot", "session"},
+		SupportedModes: []string{"codex-exec", "session"},
 		Available:      true,
 	})
 	if err != nil {
@@ -369,6 +375,39 @@ func TestBotServiceListAgentCapabilities(t *testing.T) {
 	}
 	if len(items[0].SupportedModes) != 2 {
 		t.Fatalf("unexpected supported modes: %#v", items[0].SupportedModes)
+	}
+}
+
+func TestBotServiceListAgentCapabilitiesRefreshesEnvironment(t *testing.T) {
+	repo := &agentCapabilityRepoStub{}
+	svc := &BotService{
+		capabilities: repo,
+		capabilityDiscoverer: capabilityDiscovererFunc(func(ctx context.Context) error {
+			_, err := repo.Upsert(ctx, domain.AgentCapability{
+				ID:              "cap_codex",
+				Key:             "codex",
+				Label:           "Codex CLI",
+				Command:         "/usr/local/bin/codex",
+				SupportedModes:  []string{"codex-exec", "session"},
+				Available:       true,
+				DetectionSource: "path_scan",
+			})
+			return err
+		}),
+	}
+
+	items, err := svc.ListAgentCapabilities(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 capability, got %d", len(items))
+	}
+	if items[0].Command != "/usr/local/bin/codex" {
+		t.Fatalf("unexpected command: %q", items[0].Command)
+	}
+	if !items[0].Available {
+		t.Fatal("expected capability available")
 	}
 }
 

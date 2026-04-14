@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,10 +84,60 @@ func TestMessageSimulatorSimulateBuildsInboundMessage(t *testing.T) {
 		captureMessageHandler{msgCh: msgCh},
 	)
 
-	got, err := simulator.Simulate(context.Background(), SimulateMessageInput{
+	_, err = simulator.Simulate(context.Background(), SimulateMessageInput{
 		BotID: "bot_1",
 		From:  "user_1",
 		Text:  "hello",
+	})
+	if err == nil {
+		t.Fatal("expected missing recipient_id error")
+	}
+	if !errors.Is(err, domain.ErrInvalidArg) || !strings.Contains(err.Error(), "recipient_id and text are required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case msg := <-msgCh:
+		t.Fatalf("unexpected message: %#v", msg)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestMessageSimulatorSimulateUsesExplicitRecipientID(t *testing.T) {
+	cipher := testCipher(t)
+	payload, err := json.Marshal(map[string]any{
+		"baseurl":   "https://wechat.example",
+		"bot_token": "token-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msgCh := make(chan InboundMessage, 1)
+	simulator := NewMessageSimulator(
+		newBotRepoStub(domain.Bot{
+			ID:               "bot_1",
+			ChannelType:      "wechat",
+			ChannelAccountID: "acct_1",
+		}),
+		&channelAccountRepoStub{account: domain.ChannelAccount{
+			ID:                   "acct_1",
+			AccountUID:           "wxid_1",
+			CredentialCiphertext: ciphertext,
+		}},
+		cipher,
+		captureMessageHandler{msgCh: msgCh},
+	)
+
+	got, err := simulator.Simulate(context.Background(), SimulateMessageInput{
+		BotID:       "bot_1",
+		From:        "user_1",
+		RecipientID: "wx_real_user_1",
+		Text:        "hello",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +145,7 @@ func TestMessageSimulatorSimulateBuildsInboundMessage(t *testing.T) {
 	if got.MessageID == "" {
 		t.Fatal("expected generated message id")
 	}
-	if got.RecipientID != "user_1" {
+	if got.RecipientID != "wx_real_user_1" {
 		t.Fatalf("unexpected recipient id: %q", got.RecipientID)
 	}
 
@@ -114,7 +166,7 @@ func TestMessageSimulatorSimulateBuildsInboundMessage(t *testing.T) {
 		if msg.ReplyTarget.ChannelType != "wechat" {
 			t.Fatalf("unexpected channel type: %q", msg.ReplyTarget.ChannelType)
 		}
-		if msg.ReplyTarget.RecipientID != "user_1" {
+		if msg.ReplyTarget.RecipientID != "wx_real_user_1" {
 			t.Fatalf("unexpected reply recipient: %q", msg.ReplyTarget.RecipientID)
 		}
 		if msg.ReplyTarget.MetadataValue("account_uid") != "wxid_1" {

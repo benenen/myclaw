@@ -20,7 +20,7 @@ func TestBotRepositoryCreateAndListByUserID(t *testing.T) {
 		ChannelType:       "wechat",
 		ConnectionStatus:  domain.BotConnectionStatusLoginRequired,
 		AgentCapabilityID: "cap_codex",
-		AgentMode:         "oneshot",
+		AgentMode:         "codex-exec",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestBotRepositoryCreateAndListByUserID(t *testing.T) {
 	if created.AgentCapabilityID != "cap_codex" {
 		t.Fatalf("unexpected agent capability id: %s", created.AgentCapabilityID)
 	}
-	if created.AgentMode != "oneshot" {
+	if created.AgentMode != "codex-exec" {
 		t.Fatalf("unexpected agent mode: %s", created.AgentMode)
 	}
 
@@ -48,7 +48,7 @@ func TestBotRepositoryCreateAndListByUserID(t *testing.T) {
 	if items[0].AgentCapabilityID != "cap_codex" {
 		t.Fatalf("unexpected listed agent capability id: %s", items[0].AgentCapabilityID)
 	}
-	if items[0].AgentMode != "oneshot" {
+	if items[0].AgentMode != "codex-exec" {
 		t.Fatalf("unexpected listed agent mode: %s", items[0].AgentMode)
 	}
 }
@@ -128,7 +128,7 @@ func TestAgentCapabilityRepositoryUpsertGetAndList(t *testing.T) {
 		Label:           "Codex CLI",
 		Command:         "codex",
 		Args:            []string{"reply"},
-		SupportedModes:  []string{"oneshot", "session"},
+		SupportedModes:  []string{"codex-exec", "session"},
 		Available:       true,
 		DetectionSource: "path_scan",
 	})
@@ -148,7 +148,7 @@ func TestAgentCapabilityRepositoryUpsertGetAndList(t *testing.T) {
 		Label:           "Codex CLI",
 		Command:         "/usr/local/bin/codex",
 		Args:            []string{"reply", "--plain"},
-		SupportedModes:  []string{"oneshot", "session"},
+		SupportedModes:  []string{"codex-exec", "session"},
 		Available:       false,
 		DetectionSource: "path_scan",
 	})

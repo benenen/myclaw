@@ -1,10 +1,13 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +16,7 @@ import (
 	"github.com/benenen/myclaw/internal/channel"
 )
 
-var defaultTestSpec = agent.Spec{Type: "oneshot", Command: "codex", QueueSize: 1}
+var defaultTestSpec = agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 1}
 
 func TestOrchestratorProcessesSameBotSequentially(t *testing.T) {
 	var mu sync.Mutex
@@ -41,7 +44,7 @@ func TestOrchestratorProcessesSameBotSequentially(t *testing.T) {
 	}()
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
-		return agent.Spec{Type: "oneshot", Command: "codex", QueueSize: 2}, nil
+		return agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 2}, nil
 	}})
 
 	go orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u", Text: "one"})
@@ -123,7 +126,7 @@ func TestOrchestratorDedupesMessageIDPerBot(t *testing.T) {
 	}}
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
-		return agent.Spec{Type: "oneshot", Command: "codex", QueueSize: 2}, nil
+		return agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 2}, nil
 	}})
 
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "dup", From: "u", Text: "one"})
@@ -157,7 +160,7 @@ func TestOrchestratorDoesNotDedupeEmptyMessageIDPerBot(t *testing.T) {
 	}}
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
-		return agent.Spec{Type: "oneshot", Command: "codex", QueueSize: 2}, nil
+		return agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 2}, nil
 	}})
 
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "", From: "u", Text: "one"})
@@ -729,7 +732,7 @@ func TestOrchestratorReclaimsBotStateAfterQueueDrains(t *testing.T) {
 	}}
 	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
-		return agent.Spec{Type: "oneshot", Command: "codex", QueueSize: 2}, nil
+		return agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 2}, nil
 	}})
 	orchestrator.SetWorkerIdleTimeoutForTest(50 * time.Millisecond)
 
@@ -1199,6 +1202,74 @@ func TestOrchestratorRepliesSuccessfulSendNearDeadline(t *testing.T) {
 	orchestrator.mu.Unlock()
 	if seen.inProgress {
 		t.Fatal("expected near-deadline message to finish processing")
+	}
+}
+
+func TestOrchestratorUsesSpecTimeoutWhenLongerThanProcessingTimeout(t *testing.T) {
+	done := make(chan struct{})
+	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, spec agent.Spec, _ agent.Request) (agent.Response, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected processing deadline")
+		}
+		remaining := time.Until(deadline)
+		if remaining < 150*time.Millisecond {
+			t.Fatalf("remaining deadline too short: %s", remaining)
+		}
+		if spec.Timeout != 200*time.Millisecond {
+			t.Fatalf("unexpected spec timeout: %s", spec.Timeout)
+		}
+		return agent.Response{Text: "ok"}, nil
+	}}
+	gateway := &recordingReplyGateway{done: done}
+	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
+		return agent.Spec{Type: "codex-exec", Command: "codex", Timeout: 200 * time.Millisecond}, nil
+	}})
+	orchestrator.SetProcessingTimeoutForTest(50 * time.Millisecond)
+
+	go orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m-timeout", From: "u", Text: "hello"})
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reply")
+	}
+	if !reflect.DeepEqual(gateway.texts(), []string{"ok"}) {
+		t.Fatalf("replies = %#v", gateway.texts())
+	}
+}
+
+func TestReplyWithTimeoutLogsResponseAndReplyError(t *testing.T) {
+	var logs bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer log.SetOutput(originalWriter)
+	defer log.SetFlags(originalFlags)
+
+	orchestrator := NewBotMessageOrchestrator(
+		&fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
+			return agent.Response{}, nil
+		}},
+		fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error {
+			return errors.New("reply failed")
+		}},
+		fakeResolver{},
+	)
+
+	orchestrator.replyWithTimeout(context.Background(), InboundMessage{
+		BotID:     "bot-1",
+		MessageID: "msg-1",
+		From:      "u-1",
+	}, agent.Response{Text: "hello world"})
+
+	got := logs.String()
+	if !strings.Contains(got, `text="hello world"`) {
+		t.Fatalf("logs = %q, want response text log", got)
+	}
+	if !strings.Contains(got, "reply failed") {
+		t.Fatalf("logs = %q, want reply error log", got)
 	}
 }
 

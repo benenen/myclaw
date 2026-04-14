@@ -17,17 +17,24 @@ var (
 )
 
 type BotCLIResolverConfig struct {
-	Timeout time.Duration
+	Timeout          time.Duration
+	CodexExecTimeout time.Duration
 }
 
 type BotCLIResolver struct {
-	bots         domain.BotRepository
-	capabilities domain.AgentCapabilityRepository
-	timeout      time.Duration
+	bots             domain.BotRepository
+	capabilities     domain.AgentCapabilityRepository
+	timeout          time.Duration
+	codexExecTimeout time.Duration
 }
 
 func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapabilityRepository, cfg BotCLIResolverConfig) *BotCLIResolver {
-	return &BotCLIResolver{bots: bots, capabilities: capabilities, timeout: cfg.Timeout}
+	return &BotCLIResolver{
+		bots:             bots,
+		capabilities:     capabilities,
+		timeout:          cfg.Timeout,
+		codexExecTimeout: cfg.CodexExecTimeout,
+	}
 }
 
 func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec, error) {
@@ -58,6 +65,13 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		Type:    bot.AgentMode,
 		Command: capability.Command,
 		Args:    append([]string(nil), capability.Args...),
-		Timeout: r.timeout,
+		Timeout: r.timeoutForMode(bot.AgentMode),
 	}, nil
+}
+
+func (r *BotCLIResolver) timeoutForMode(mode string) time.Duration {
+	if mode == "codex-exec" && r.codexExecTimeout > 0 {
+		return r.codexExecTimeout
+	}
+	return r.timeout
 }

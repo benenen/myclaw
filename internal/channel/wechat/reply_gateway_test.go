@@ -19,7 +19,7 @@ func (f fakeClient) SendTextMessage(ctx context.Context, opts SendMessageOptions
 
 func TestReplyGatewayReply(t *testing.T) {
 	client := fakeClient{send: func(ctx context.Context, opts SendMessageOptions) error {
-		if opts.ToUserID != "user-1" || opts.Text != "hello" || opts.Token != "token" || opts.WechatUIN != "uin" || opts.BaseURL != "https://wechat.example" {
+		if opts.ToUserID != "user-1" || opts.Text != "hello" || opts.Token != "token" || opts.WechatUIN != "uin" || opts.BaseURL != "https://wechat.example" || opts.ContextToken != "ctx-1" {
 			t.Fatalf("opts = %#v", opts)
 		}
 		return nil
@@ -29,9 +29,10 @@ func TestReplyGatewayReply(t *testing.T) {
 		ChannelType: "wechat",
 		RecipientID: "user-1",
 		Metadata: map[string]string{
-			"base_url":   "https://wechat.example",
-			"token":      "token",
-			"wechat_uin": "uin",
+			"base_url":      "https://wechat.example",
+			"token":         "token",
+			"wechat_uin":    "uin",
+			"context_token": "ctx-1",
 		},
 	}, agent.Response{Text: "hello"})
 	if err != nil {
@@ -45,9 +46,10 @@ func TestReplyGatewayReplyWrapsSendFailure(t *testing.T) {
 	}}
 	gateway := NewReplyGateway(client)
 	err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
-		"base_url":   "https://wechat.example",
-		"token":      "token",
-		"wechat_uin": "uin",
+		"base_url":      "https://wechat.example",
+		"token":         "token",
+		"wechat_uin":    "uin",
+		"context_token": "ctx-1",
 	}}, agent.Response{Text: "hello"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -105,18 +107,30 @@ func TestReplyGatewayReplyRequiresWechatUIN(t *testing.T) {
 	}
 }
 
+func TestReplyGatewayReplyRequiresContextToken(t *testing.T) {
+	gateway := NewReplyGateway(fakeClient{send: func(ctx context.Context, opts SendMessageOptions) error { return nil }})
+	if err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
+		"base_url":   "https://wechat.example",
+		"token":      "token",
+		"wechat_uin": "uin",
+	}}, agent.Response{Text: "hello"}); err != ErrMissingReplyContextToken {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestReplyGatewayReplyTrimsReplyMetadata(t *testing.T) {
 	client := fakeClient{send: func(ctx context.Context, opts SendMessageOptions) error {
-		if opts.BaseURL != "https://wechat.example" || opts.Token != "token" || opts.WechatUIN != "uin" || opts.ToUserID != "user-1" {
+		if opts.BaseURL != "https://wechat.example" || opts.Token != "token" || opts.WechatUIN != "uin" || opts.ToUserID != "user-1" || opts.ContextToken != "ctx-1" {
 			t.Fatalf("opts = %#v", opts)
 		}
 		return nil
 	}}
 	gateway := NewReplyGateway(client)
 	if err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: " user-1 ", Metadata: map[string]string{
-		"base_url":   " https://wechat.example ",
-		"token":      " token ",
-		"wechat_uin": " uin ",
+		"base_url":      " https://wechat.example ",
+		"token":         " token ",
+		"wechat_uin":    " uin ",
+		"context_token": " ctx-1 ",
 	}}, agent.Response{Text: "hello"}); err != nil {
 		t.Fatalf("Reply() error = %v", err)
 	}
@@ -135,9 +149,10 @@ func TestValidateReplyTargetRejectsWhitespaceOnlyMetadata(t *testing.T) {
 
 func TestValidateReplyTargetAcceptsCompleteTarget(t *testing.T) {
 	if err := validateReplyTarget(channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
-		"base_url":   "https://wechat.example",
-		"token":      "token",
-		"wechat_uin": "uin",
+		"base_url":      "https://wechat.example",
+		"token":         "token",
+		"wechat_uin":    "uin",
+		"context_token": "ctx-1",
 	}}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -244,9 +259,10 @@ func TestReplyGatewayReplyKeepsTrimmedText(t *testing.T) {
 	}}
 	gateway := NewReplyGateway(client)
 	if err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
-		"base_url":   "https://wechat.example",
-		"token":      "token",
-		"wechat_uin": "uin",
+		"base_url":      "https://wechat.example",
+		"token":         "token",
+		"wechat_uin":    "uin",
+		"context_token": "ctx-1",
 	}}, agent.Response{Text: "  hello  "}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -261,9 +277,10 @@ func TestReplyGatewayReplyDoesNotTrimInnerWhitespace(t *testing.T) {
 	}}
 	gateway := NewReplyGateway(client)
 	if err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
-		"base_url":   "https://wechat.example",
-		"token":      "token",
-		"wechat_uin": "uin",
+		"base_url":      "https://wechat.example",
+		"token":         "token",
+		"wechat_uin":    "uin",
+		"context_token": "ctx-1",
 	}}, agent.Response{Text: "\nhello\nworld\n"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -311,9 +328,10 @@ func TestReplyGatewayReplyUsesTrimmedMetadataOnWrappedSendFailure(t *testing.T) 
 	}}
 	gateway := NewReplyGateway(client)
 	err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: " user-1 ", Metadata: map[string]string{
-		"base_url":   " https://wechat.example ",
-		"token":      " token ",
-		"wechat_uin": " uin ",
+		"base_url":      " https://wechat.example ",
+		"token":         " token ",
+		"wechat_uin":    " uin ",
+		"context_token": " ctx-1 ",
 	}}, agent.Response{Text: "hello"})
 	if err == nil || err.Error() != "wechat reply: send failed" {
 		t.Fatalf("unexpected error: %v", err)
@@ -344,9 +362,10 @@ func TestReplyGatewayReplyTrimsWhitespaceBeforeSend(t *testing.T) {
 	}}
 	gateway := NewReplyGateway(client)
 	if err := gateway.Reply(context.Background(), channel.ReplyTarget{RecipientID: "user-1", Metadata: map[string]string{
-		"base_url":   "https://wechat.example",
-		"token":      "token",
-		"wechat_uin": "uin",
+		"base_url":      "https://wechat.example",
+		"token":         "token",
+		"wechat_uin":    "uin",
+		"context_token": "ctx-1",
 	}}, agent.Response{Text: "  hello\n"}); err != nil {
 		t.Fatalf("Reply() error = %v", err)
 	}

@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -17,7 +18,7 @@ const (
 	seenMessageTTL         = 10 * time.Minute
 	cleanupInterval        = time.Minute
 	workerIdleTimeout      = seenMessageTTL
-	processingTimeout      = 300000 * time.Second
+	processingTimeout      = 30 * time.Second
 	replyTimeout           = 5 * time.Second
 	finishWaitPollInterval = 10 * time.Millisecond
 	defaultQueueSize       = 1
@@ -264,12 +265,12 @@ func (o *BotMessageOrchestrator) runWorker(botID string, worker *botWorker) {
 
 func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage) {
 	o.markMessageStarted(msg)
-	ctx, cancel := o.processingContext(msg.Ctx)
-	defer cancel()
+	resolveCtx, cancelResolve := o.processingContext(msg.Ctx, 0)
 
-	spec, err := o.resolver.Resolve(ctx, botID)
+	spec, err := o.resolver.Resolve(resolveCtx, botID)
+	cancelResolve()
 	if err != nil {
-		o.replyWithTimeout(ctx, msg, agent.Response{Text: failedReply})
+		o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: failedReply})
 		o.finishMessageEventually(msg, false)
 		return
 	}
@@ -279,6 +280,9 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 	}
 	o.resizeWorkerQueue(botID, queueSize)
 	o.waitForQueueCapacity(botID, queueSize)
+
+	ctx, cancel := o.processingContext(msg.Ctx, spec.Timeout)
+	defer cancel()
 
 	type sendResult struct {
 		resp agent.Response
@@ -300,6 +304,7 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 	select {
 	case result = <-sendDone:
 	case <-ctx.Done():
+		log.Printf("processing timeout: bot_id=%s message_id=%s", msg.BotID, msg.MessageID)
 		result.err = ctx.Err()
 	}
 
@@ -317,10 +322,13 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 	o.finishMessageEventually(msg, true)
 }
 
-func (o *BotMessageOrchestrator) processingContext(parent context.Context) (context.Context, context.CancelFunc) {
+func (o *BotMessageOrchestrator) processingContext(parent context.Context, minTimeout time.Duration) (context.Context, context.CancelFunc) {
 	o.mu.Lock()
 	timeout := o.processingTimeout
 	o.mu.Unlock()
+	if minTimeout > timeout {
+		timeout = minTimeout
+	}
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -338,7 +346,10 @@ func (o *BotMessageOrchestrator) replyWithTimeout(ctx context.Context, msg Inbou
 	replyMsg := msg
 	replyMsg.Ctx = replyCtx
 	go func() {
-		_ = o.reply(replyMsg, resp)
+		log.Printf("bot reply sending: bot_id=%s message_id=%s text=%q", msg.BotID, msg.MessageID, resp.Text)
+		if err := o.reply(replyMsg, resp); err != nil {
+			log.Printf("bot reply failed: bot_id=%s message_id=%s error=%v", msg.BotID, msg.MessageID, err)
+		}
 		replyDone <- struct{}{}
 	}()
 

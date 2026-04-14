@@ -66,7 +66,7 @@ func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Ses
 func driverForSpec(spec Spec) (Driver, error) {
 	name := spec.Type
 	if name == "" {
-		name = "oneshot"
+		name = "codex-exec"
 	}
 	driver, ok := LookupDriver(name)
 	if !ok {

@@ -1,13 +1,13 @@
 package codex
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -16,14 +16,6 @@ import (
 
 	"github.com/benenen/myclaw/internal/agent"
 	"github.com/creack/pty"
-)
-
-var (
-	ansiPattern       = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
-	oscPattern        = regexp.MustCompile(`\x1b\].*?(?:\x07|\x1b\\)`)
-	stringPattern     = regexp.MustCompile(`\x1b(?:P|_|\^|X).*?(?:\x07|\x1b\\)`)
-	escSinglePattern  = regexp.MustCompile(`\x1b(?:[@-_]|[78])`)
-	escCharsetPattern = regexp.MustCompile(`\x1b[()][0-9A-Za-z]`)
 )
 
 type PTYDriver struct{}
@@ -39,6 +31,7 @@ const (
 
 const (
 	terminateWaitTimeout = 2 * time.Second
+	defaultPrompt        = "codex>"
 )
 
 var defaultRunTimeout = 30 * time.Second
@@ -49,14 +42,31 @@ type PTYRuntime struct {
 	cmd        *exec.Cmd
 	ptyFile    *os.File
 	state      runtimeState
-	prompt     string
 	notifyCh   chan struct{}
 	readErr    error
 	raw        []byte
-	normalized strings.Builder
+	normalized bytes.Buffer
+	sanitizer  terminalSanitizer
 	closeOnce  sync.Once
 	waitFunc   func() error
-	runSeq     uint64
+}
+
+type sanitizerState int
+
+const (
+	sanitizerStateNormal sanitizerState = iota
+	sanitizerStateEsc
+	sanitizerStateCSI
+	sanitizerStateOSC
+	sanitizerStateOSCEsc
+	sanitizerStateString
+	sanitizerStateStringEsc
+	sanitizerStateCharset
+)
+
+type terminalSanitizer struct {
+	state     sanitizerState
+	pendingCR bool
 }
 
 func init() {
@@ -95,11 +105,6 @@ func (d *PTYDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		waitFunc: cmd.Wait,
 	}
 	go runtime.readLoop()
-
-	if err := runtime.waitReady(ctx, spec.Timeout); err != nil {
-		_ = runtime.close()
-		return nil, err
-	}
 
 	return runtime, nil
 }
@@ -215,18 +220,14 @@ func (r *PTYRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 		r.mu.Unlock()
 		return agent.Response{}, err
 	}
-	if r.state != stateReady {
+	if r.state != stateReady && r.state != stateStarting {
 		state := r.state
 		r.mu.Unlock()
 		return agent.Response{}, fmt.Errorf("codex pty runtime is not ready: %s", state)
 	}
 
-	r.runSeq++
-	runID := r.runSeq
-	marker := fmt.Sprintf("__MYCLAW_END_%d__", runID)
 	beforeLen := r.normalized.Len()
 	ptyFile := r.ptyFile
-	prompt := r.prompt
 	r.state = stateRunning
 	r.mu.Unlock()
 
@@ -235,7 +236,10 @@ func (r *PTYRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 		return agent.Response{}, fmt.Errorf("codex pty runtime is closed")
 	}
 
-	payload := buildRunPayload(promptText, marker)
+	payload := promptText
+	if !strings.HasSuffix(payload, "\n") {
+		payload += "\n"
+	}
 	if _, err := io.WriteString(ptyFile, payload); err != nil {
 		r.markBroken(fmt.Errorf("codex pty write failed: %w", err))
 		return agent.Response{}, r.currentError()
@@ -248,10 +252,12 @@ func (r *PTYRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	}
 	defer cancel()
 
-	result, err := r.waitRunCompletion(runCtx, ctx, beforeLen, marker, prompt, promptText)
+	result, err := r.waitRunCompletion(runCtx, ctx, beforeLen, defaultPrompt, promptText)
 	duration := time.Since(start)
 	if err != nil {
-		if shouldBreakRuntime(err) {
+		if errors.Is(err, context.Canceled) && callerCanceledWithoutDeadline(ctx) {
+			go r.recoverCanceledRun(beforeLen, defaultPrompt, promptText)
+		} else if shouldBreakRuntime(err) {
 			r.markBroken(err)
 		} else {
 			r.mu.Lock()
@@ -277,12 +283,30 @@ func (r *PTYRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	}, nil
 }
 
+func (r *PTYRuntime) recoverCanceledRun(start int, prompt, promptText string) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRunTimeout)
+	defer cancel()
+
+	_, err := r.waitRunCompletion(ctx, nil, start, prompt, promptText)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state == stateBroken {
+		return
+	}
+	if err != nil {
+		r.readErr = err
+		r.state = stateBroken
+		return
+	}
+	r.state = stateReady
+}
+
 type runResult struct {
 	text string
 	raw  string
 }
 
-func (r *PTYRuntime) waitRunCompletion(runCtx, callerCtx context.Context, start int, marker, prompt, promptText string) (runResult, error) {
+func (r *PTYRuntime) waitRunCompletion(runCtx, callerCtx context.Context, start int, prompt, promptText string) (runResult, error) {
 	for {
 		r.mu.Lock()
 		text := r.normalized.String()
@@ -290,7 +314,7 @@ func (r *PTYRuntime) waitRunCompletion(runCtx, callerCtx context.Context, start 
 		state := r.state
 		r.mu.Unlock()
 
-		if completed, result, _ := extractRunResult(text, start, marker, prompt, promptText); completed {
+		if completed, result, _ := extractRunResult(text, start, prompt, promptText); completed {
 			return result, nil
 		}
 
@@ -343,11 +367,14 @@ func (r *PTYRuntime) readLoop() {
 
 		n, err := ptyFile.Read(buf)
 		if n > 0 {
-			chunk := string(buf[:n])
+			chunk := buf[:n]
 			r.mu.Lock()
-			r.raw = append(r.raw, buf[:n]...)
-			r.normalized.WriteString(normalizeOutput(chunk))
+			r.raw = append(r.raw, chunk...)
+			normalized := r.sanitizer.Write(&r.normalized, chunk)
 			r.mu.Unlock()
+			if normalized != "" && debugPTYOutputEnabled() {
+				_, _ = os.Stderr.WriteString(normalized)
+			}
 			r.signal()
 		}
 		if err != nil {
@@ -355,7 +382,7 @@ func (r *PTYRuntime) readLoop() {
 			if !isTerminalReadError(err) {
 				r.readErr = err
 				r.state = stateBroken
-			} else if r.state == stateRunning || (r.state == stateStarting && r.prompt == "") {
+			} else if r.state == stateRunning || r.state == stateStarting {
 				r.readErr = io.EOF
 				r.state = stateBroken
 			}
@@ -364,49 +391,6 @@ func (r *PTYRuntime) readLoop() {
 			return
 		}
 	}
-}
-
-func (r *PTYRuntime) waitReady(ctx context.Context, timeout time.Duration) error {
-	readyCtx := ctx
-	cancel := func() {}
-	if timeout > 0 {
-		readyCtx, cancel = context.WithTimeout(ctx, timeout)
-	}
-	defer cancel()
-
-	for {
-		r.mu.Lock()
-		text := r.normalized.String()
-		if prompt, ok := hasPrompt(text); ok {
-			r.prompt = prompt
-			r.state = stateReady
-			r.mu.Unlock()
-			return nil
-		}
-		err := r.readErr
-		r.mu.Unlock()
-		if err != nil {
-			return err
-		}
-
-		select {
-		case <-readyCtx.Done():
-			return readyCtx.Err()
-		case <-r.notifyCh:
-		}
-	}
-}
-
-func hasPrompt(text string) (string, bool) {
-	if idx, ok := promptIndexOnOwnLine(text, "codex>"); ok {
-		_ = idx
-		return "codex>", true
-	}
-	if idx, ok := promptIndexOnOwnLine(text, "codex❯"); ok {
-		_ = idx
-		return "codex❯", true
-	}
-	return "", false
 }
 
 func flattenEnv(env map[string]string) []string {
@@ -456,156 +440,127 @@ func (r *PTYRuntime) currentError() error {
 	return fmt.Errorf("codex pty runtime is broken")
 }
 
-func stripANSI(text string) string {
-	text = oscPattern.ReplaceAllString(text, "")
-	text = stringPattern.ReplaceAllString(text, "")
-	text = ansiPattern.ReplaceAllString(text, "")
-	text = escCharsetPattern.ReplaceAllString(text, "")
-	text = escSinglePattern.ReplaceAllString(text, "")
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return text
-}
-
 func normalizeOutput(text string) string {
-	text = stripANSI(text)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	return text
+	var out bytes.Buffer
+	var sanitizer terminalSanitizer
+	return sanitizer.Write(&out, []byte(text))
 }
 
-func findMarker(text, marker string) int {
-	if marker == "" {
-		return -1
+func debugPTYOutputEnabled() bool {
+	value := strings.TrimSpace(os.Getenv("MYCLAW_DEBUG_PTY_OUTPUT"))
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
-	for _, idx := range markerLineIndexes(text, marker) {
-		return idx
-	}
-	return -1
 }
 
-func sliceRunOutput(text string, start int, marker string) (string, error) {
-	if marker == "" {
-		return "", fmt.Errorf("marker must not be empty")
-	}
-	if start < 0 || start > len(text) {
-		return "", fmt.Errorf("invalid start offset: %d", start)
+func (s *terminalSanitizer) Write(dst *bytes.Buffer, chunk []byte) string {
+	if len(chunk) == 0 {
+		return ""
 	}
 
-	idx := findMarker(text[start:], marker)
-	if idx < 0 {
-		return "", fmt.Errorf("marker not found")
-	}
-
-	return text[start : start+idx], nil
-}
-
-func markerLineIndexes(text, marker string) []int {
-	if marker == "" {
-		return nil
-	}
-
-	var indexes []int
-	searchFrom := 0
-	for searchFrom <= len(text) {
-		idx := strings.Index(text[searchFrom:], marker)
-		if idx < 0 {
-			break
-		}
-		idx += searchFrom
-		lineStart := idx == 0 || text[idx-1] == '\n'
-		lineEnd := idx+len(marker) == len(text) || text[idx+len(marker)] == '\n'
-		if lineStart && lineEnd {
-			indexes = append(indexes, idx)
-		}
-		searchFrom = idx + len(marker)
-	}
-	return indexes
-}
-
-func nextPrompt(text, prompt string) (int, bool) {
-	if prompt == "" {
-		return 0, false
-	}
-	for i, line := range strings.Split(text, "\n") {
-		_ = i
-		trimmed := strings.TrimSpace(line)
-		if trimmed == strings.TrimSpace(prompt) {
-			idx := strings.Index(text, line)
-			for idx >= 0 {
-				lineStart := idx == 0 || text[idx-1] == '\n'
-				lineEnd := idx+len(line) == len(text) || text[idx+len(line)] == '\n'
-				if lineStart && lineEnd {
-					return idx, true
-				}
-				next := strings.Index(text[idx+len(line):], line)
-				if next < 0 {
-					break
-				}
-				idx += len(line) + next
+	var emitted bytes.Buffer
+	for _, b := range chunk {
+		if s.pendingCR {
+			if b == '\n' {
+				dst.WriteByte('\n')
+				emitted.WriteByte('\n')
+				s.pendingCR = false
+				continue
 			}
+			truncateCurrentLine(dst)
+			truncateCurrentLine(&emitted)
+			s.pendingCR = false
 		}
+		s.writeByte(dst, &emitted, b)
 	}
-	return 0, false
+	return emitted.String()
 }
 
-func lineStartAfterMarker(text string, markerIdx int, marker string) int {
-	outputStart := markerIdx + len(marker)
-	if outputStart < len(text) && text[outputStart] == '\n' {
-		outputStart++
+func (s *terminalSanitizer) writeByte(dst, emitted *bytes.Buffer, b byte) {
+	switch s.state {
+	case sanitizerStateNormal:
+		switch b {
+		case 0x1b:
+			s.state = sanitizerStateEsc
+		case '\r':
+			s.pendingCR = true
+		case '\n':
+			dst.WriteByte('\n')
+			emitted.WriteByte('\n')
+		case 0x00:
+		default:
+			dst.WriteByte(b)
+			emitted.WriteByte(b)
+		}
+	case sanitizerStateEsc:
+		switch b {
+		case '[':
+			s.state = sanitizerStateCSI
+		case ']':
+			s.state = sanitizerStateOSC
+		case 'P', '_', '^', 'X':
+			s.state = sanitizerStateString
+		case '(', ')':
+			s.state = sanitizerStateCharset
+		default:
+			s.state = sanitizerStateNormal
+		}
+	case sanitizerStateCSI:
+		if b >= 0x40 && b <= 0x7e {
+			s.state = sanitizerStateNormal
+		}
+	case sanitizerStateOSC:
+		switch b {
+		case 0x07:
+			s.state = sanitizerStateNormal
+		case 0x1b:
+			s.state = sanitizerStateOSCEsc
+		}
+	case sanitizerStateOSCEsc:
+		if b == '\\' {
+			s.state = sanitizerStateNormal
+			return
+		}
+		s.state = sanitizerStateOSC
+	case sanitizerStateString:
+		switch b {
+		case 0x07:
+			s.state = sanitizerStateNormal
+		case 0x1b:
+			s.state = sanitizerStateStringEsc
+		}
+	case sanitizerStateStringEsc:
+		if b == '\\' {
+			s.state = sanitizerStateNormal
+			return
+		}
+		s.state = sanitizerStateString
+	case sanitizerStateCharset:
+		s.state = sanitizerStateNormal
 	}
-	return outputStart
 }
 
-func buildRunPayload(promptText, marker string) string {
-	return marker + "\n" + promptText + "\n" + marker + "\n"
+func truncateCurrentLine(buf *bytes.Buffer) {
+	data := buf.Bytes()
+	idx := bytes.LastIndexByte(data, '\n')
+	if idx < 0 {
+		buf.Reset()
+		return
+	}
+	buf.Truncate(idx + 1)
 }
 
-func helperTranscriptShape(prompt, marker, response string) string {
-	_ = prompt
+func helperTranscriptShape(prompt, response string) string {
 	if response == "" {
 		response = "assistant response: " + prompt
 	}
 	if !strings.HasSuffix(response, "\n") {
 		response += "\n"
 	}
-	return response + marker + "\n" + "codex>\n"
-}
-
-func markerLineEnd(text string, idx int, marker string) int {
-	end := idx + len(marker)
-	if end < len(text) && text[end] == '\n' {
-		end++
-	}
-	return end
-}
-
-func markerIndexAfter(text, marker string, start int) (int, bool) {
-	if marker == "" || start < 0 || start > len(text) {
-		return 0, false
-	}
-	for _, idx := range markerLineIndexes(text[start:], marker) {
-		return start + idx, true
-	}
-	return 0, false
-}
-
-func payloadBoundary(text string, start int, marker string) (int, int, bool) {
-	if start < 0 || start > len(text) {
-		return 0, 0, false
-	}
-	firstIdx, ok := markerIndexAfter(text, marker, start)
-	if !ok || firstIdx != start {
-		return 0, 0, false
-	}
-	return firstIdx, markerLineEnd(text, firstIdx, marker), true
-}
-
-func closingMarkerBoundary(text, marker string, start int) (int, int, bool) {
-	idx, ok := markerIndexAfter(text, marker, start)
-	if !ok {
-		return 0, 0, false
-	}
-	return idx, markerLineEnd(text, idx, marker), true
+	return response + "codex>\n"
 }
 
 func promptBlock(text string, prompt string, start int) (int, int, bool) {
@@ -654,72 +609,44 @@ func buildRawOutput(protocol string) string {
 	return protocol
 }
 
-func extractRunResult(text string, start int, marker, prompt, promptText string) (bool, runResult, bool) {
-	payloadIdx, payloadEnd, ok := payloadBoundary(text, start, marker)
-	if !ok || payloadIdx != start {
+func extractRunResult(text string, start int, prompt, promptText string) (bool, runResult, bool) {
+	if start < 0 || start > len(text) {
 		return false, runResult{}, false
 	}
 
-	promptIdx, promptEnd, ok := promptBlockFrom(text, prompt, payloadEnd)
+	promptIdx, promptEnd, ok := promptBlockFrom(text, prompt, start)
 	if !ok {
 		return false, runResult{}, false
 	}
 
-	segment := text[payloadEnd:promptIdx]
-	body, ok := extractProtocolBody(segment, marker, strings.TrimSpace(promptText))
-	if !ok {
+	response := normalizeRunSegment(text[start:promptIdx], promptText)
+	if response == "" && strings.TrimSpace(promptText) != "" {
 		return false, runResult{}, false
 	}
-
-	response := normalizeRunSegment(body, strings.TrimSpace(promptText))
-	protocol := helperTranscriptShape(promptText, marker, response)
 	return true, runResult{
 		text: response,
-		raw:  buildRawOutput(protocol[:len(protocol)-len("codex>\n")] + text[promptIdx:promptEnd]),
+		raw:  buildRawOutput(text[start:promptEnd]),
 	}, false
 }
 
-func extractProtocolBody(segment, marker, promptText string) (string, bool) {
-	if marker == "" {
-		return "", false
-	}
-	trimmed := strings.TrimLeft(segment, "\n")
-	if trimmed == "" {
-		return "", false
-	}
-
-	lines := strings.Split(trimmed, "\n")
-	markerIndexes := make([]int, 0, 2)
-	for i, line := range lines {
-		if strings.TrimSpace(line) == marker {
-			markerIndexes = append(markerIndexes, i)
-		}
-	}
-	if len(markerIndexes) == 0 {
-		return strings.TrimRight(trimmed, "\n"), true
-	}
-	if len(markerIndexes) == 1 {
-		body := strings.Join(lines[:markerIndexes[0]], "\n")
-		if cleanupRunText(body) == "" && promptText != "" {
-			return "assistant response: " + promptText, true
-		}
-		return body, true
-	}
-
-	between := strings.Join(lines[:markerIndexes[0]], "\n")
-	if promptText != "" && cleanupRunText(between) == promptText {
-		body := strings.Join(lines[markerIndexes[0]+1:markerIndexes[1]], "\n")
-		if cleanupRunText(body) == "" {
-			return "assistant response: " + promptText, true
-		}
-		return body, true
-	}
-	return between, true
-}
-
 func normalizeRunSegment(text, promptText string) string {
-	_ = promptText
-	return cleanupRunText(text)
+	if idx, end, ok := lastPromptBoundary(text); ok {
+		text = text[end:]
+		if idx >= 0 {
+			text = strings.TrimPrefix(text, "\n")
+		}
+	}
+	text = cleanupRunText(text)
+	trimmedPrompt := strings.TrimSpace(promptText)
+	if trimmedPrompt == "" || text == "" {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == trimmedPrompt {
+		lines = lines[1:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func preferRunError(runCtx context.Context, readErr error) error {
@@ -750,32 +677,6 @@ func waitRunCompletionState(readErr error, state runtimeState) error {
 		return nil
 	}
 	return nil
-}
-
-func outputEndBoundary(text, prompt string, start int) (int, bool) {
-	promptLine := promptLineText(prompt)
-	if promptLine == "" || start < 0 || start > len(text) {
-		return 0, false
-	}
-
-	offset := start
-	for offset <= len(text) {
-		idx, ok := promptIndexOnOwnLine(text[offset:], prompt)
-		if !ok {
-			return 0, false
-		}
-		promptIdx := offset + idx
-		end := promptIdx + len(promptLine)
-		if end < len(text) && text[end] == '\n' {
-			end++
-		}
-		remainder := text[end:]
-		if strings.TrimSpace(remainder) == "" {
-			return promptIdx, true
-		}
-		offset = end
-	}
-	return 0, false
 }
 
 func classifyContextTermination(r *PTYRuntime, callerCtx context.Context, err error) error {
@@ -816,6 +717,13 @@ func cleanupRunText(text string) string {
 	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
 		lines = lines[1:]
 	}
+	for len(lines) > 0 {
+		trimmed := strings.TrimSpace(lines[0])
+		if trimmed != defaultPrompt && trimmed != "codex❯" {
+			break
+		}
+		lines = lines[1:]
+	}
 	if len(lines) >= 2 && strings.HasPrefix(lines[1], "user input: ") {
 		lines = lines[1:]
 	}
@@ -823,6 +731,35 @@ func cleanupRunText(text string) string {
 		lines = lines[1:]
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func lastPromptBoundary(text string) (int, int, bool) {
+	bestIdx := -1
+	bestEnd := -1
+	for _, prompt := range []string{defaultPrompt, "codex❯"} {
+		promptLine := promptLineText(prompt)
+		if promptLine == "" {
+			continue
+		}
+		for offset := 0; offset <= len(text); {
+			idx, ok := promptIndexOnOwnLine(text[offset:], prompt)
+			if !ok {
+				break
+			}
+			absIdx := offset + idx
+			end := absIdx + len(promptLine)
+			if end < len(text) && text[end] == '\n' {
+				end++
+			}
+			bestIdx = absIdx
+			bestEnd = end
+			offset = end
+		}
+	}
+	if bestIdx < 0 {
+		return 0, 0, false
+	}
+	return bestIdx, bestEnd, true
 }
 
 func promptLineText(prompt string) string {

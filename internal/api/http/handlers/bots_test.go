@@ -80,7 +80,7 @@ func TestConfigureBotAgentHandlerReturnsEnvelope(t *testing.T) {
 		t.Fatalf("unexpected bot id payload: %#v", payload["bot_id"])
 	}
 
-	rr := testutil.PostJSON(t, ts, "/api/v1/bots/agent", `{"bot_id":"`+botID+`","agent_capability_id":"cap_codex","agent_mode":"oneshot"}`)
+	rr := testutil.PostJSON(t, ts, "/api/v1/bots/agent", `{"bot_id":"`+botID+`","agent_capability_id":"cap_codex","agent_mode":"codex-exec"}`)
 	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestConfigureBotAgentHandlerReturnsEnvelope(t *testing.T) {
 	if payload["agent_capability_id"] != "cap_codex" {
 		t.Fatalf("unexpected capability: %#v", payload["agent_capability_id"])
 	}
-	if payload["agent_mode"] != "oneshot" {
+	if payload["agent_mode"] != "codex-exec" {
 		t.Fatalf("unexpected mode: %#v", payload["agent_mode"])
 	}
 }

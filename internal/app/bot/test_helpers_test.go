@@ -8,11 +8,32 @@ import (
 
 type agentCapabilityRepoStub struct {
 	byID       map[string]domain.AgentCapability
+	byKey      map[string]domain.AgentCapability
+	list       []domain.AgentCapability
 	getByIDErr error
 }
 
-func (r *agentCapabilityRepoStub) Upsert(context.Context, domain.AgentCapability) (domain.AgentCapability, error) {
-	panic("unexpected Upsert call")
+func (r *agentCapabilityRepoStub) Upsert(_ context.Context, capability domain.AgentCapability) (domain.AgentCapability, error) {
+	if r.byID == nil {
+		r.byID = map[string]domain.AgentCapability{}
+	}
+	if r.byKey == nil {
+		r.byKey = map[string]domain.AgentCapability{}
+	}
+	r.byID[capability.ID] = capability
+	r.byKey[capability.Key] = capability
+	found := false
+	for idx := range r.list {
+		if r.list[idx].Key == capability.Key {
+			r.list[idx] = capability
+			found = true
+			break
+		}
+	}
+	if !found {
+		r.list = append(r.list, capability)
+	}
+	return capability, nil
 }
 
 func (r *agentCapabilityRepoStub) GetByID(_ context.Context, id string) (domain.AgentCapability, error) {
@@ -25,12 +46,15 @@ func (r *agentCapabilityRepoStub) GetByID(_ context.Context, id string) (domain.
 	return domain.AgentCapability{}, domain.ErrNotFound
 }
 
-func (r *agentCapabilityRepoStub) GetByKey(context.Context, string) (domain.AgentCapability, error) {
-	panic("unexpected GetByKey call")
+func (r *agentCapabilityRepoStub) GetByKey(_ context.Context, key string) (domain.AgentCapability, error) {
+	if capability, ok := r.byKey[key]; ok {
+		return capability, nil
+	}
+	return domain.AgentCapability{}, domain.ErrNotFound
 }
 
 func (r *agentCapabilityRepoStub) List(context.Context) ([]domain.AgentCapability, error) {
-	panic("unexpected List call")
+	return append([]domain.AgentCapability(nil), r.list...), nil
 }
 
 type botRepoStub struct {

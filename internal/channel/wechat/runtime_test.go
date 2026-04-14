@@ -142,6 +142,91 @@ func TestStartRuntimeEmitsConnectedAndMessageEvent(t *testing.T) {
 	if replyTarget.MetadataValue("base_url") != "https://wechat.example" || replyTarget.MetadataValue("token") != "token-1" || replyTarget.MetadataValue("wechat_uin") != "uin-1" {
 		t.Fatalf("unexpected reply target metadata: %#v", replyTarget.Metadata)
 	}
+	if replyTarget.MetadataValue("context_token") != "" {
+		t.Fatalf("unexpected context token: %#v", replyTarget.Metadata)
+	}
+}
+
+func TestStartRuntimePropagatesContextTokenToReplyTarget(t *testing.T) {
+	provider := NewProvider(&pollingClient{resp: GetUpdatesResult{Messages: []Message{{MsgID: "msg_test_1", From: "wxid_1", Text: "hello from test", ContextToken: "ctx-1"}}}}, nil)
+	messageCh := make(chan channel.RuntimeEvent, 1)
+
+	payload, _ := json.Marshal(map[string]any{
+		"openid":     "wxid_1",
+		"baseurl":    "https://wechat.example",
+		"bot_token":  "token-1",
+		"wechat_uin": "uin-1",
+	})
+
+	handle, err := provider.StartRuntime(context.Background(), channel.StartRuntimeRequest{
+		BotID:             "bot_1",
+		ChannelType:       "wechat",
+		AccountUID:        "wxid_1",
+		CredentialPayload: payload,
+		CredentialVersion: 1,
+		Callbacks: channel.RuntimeCallbacks{
+			OnEvent: func(ev channel.RuntimeEvent) {
+				select {
+				case messageCh <- ev:
+				default:
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Stop()
+
+	select {
+	case ev := <-messageCh:
+		if ev.ReplyTarget.MetadataValue("context_token") != "ctx-1" {
+			t.Fatalf("unexpected context token: %#v", ev.ReplyTarget.Metadata)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected inbound message event")
+	}
+}
+
+func TestStartRuntimeOmitsEmptyContextToken(t *testing.T) {
+	provider := NewProvider(&pollingClient{resp: GetUpdatesResult{Messages: []Message{{MsgID: "msg_test_1", From: "wxid_1", Text: "hello from test"}}}}, nil)
+	messageCh := make(chan channel.RuntimeEvent, 1)
+
+	payload, _ := json.Marshal(map[string]any{
+		"openid":     "wxid_1",
+		"baseurl":    "https://wechat.example",
+		"bot_token":  "token-1",
+		"wechat_uin": "uin-1",
+	})
+
+	handle, err := provider.StartRuntime(context.Background(), channel.StartRuntimeRequest{
+		BotID:             "bot_1",
+		ChannelType:       "wechat",
+		AccountUID:        "wxid_1",
+		CredentialPayload: payload,
+		CredentialVersion: 1,
+		Callbacks: channel.RuntimeCallbacks{
+			OnEvent: func(ev channel.RuntimeEvent) {
+				select {
+				case messageCh <- ev:
+				default:
+				}
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Stop()
+
+	select {
+	case ev := <-messageCh:
+		if ev.ReplyTarget.MetadataValue("context_token") != "" {
+			t.Fatalf("unexpected context token: %#v", ev.ReplyTarget.Metadata)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected inbound message event")
+	}
 }
 
 func TestStartRuntimePreservesPollTimeoutWhenServerReturnsZeroNextTimeout(t *testing.T) {

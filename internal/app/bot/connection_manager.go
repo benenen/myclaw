@@ -93,7 +93,7 @@ func (m *BotConnectionManager) Start(ctx context.Context, botID string) error {
 			Callbacks: channel.RuntimeCallbacks{
 				OnEvent: func(ev channel.RuntimeEvent) {
 					if m.logger != nil {
-						m.logger.Info("runtime message", "bot_id", ev.BotID, "channel_type", ev.ChannelType, "message_id", ev.MessageID, "from", ev.From, "text", ev.Text)
+						m.logger.Info("runtime message", "bot_id", ev.BotID, "channel_type", ev.ChannelType, "message_id", ev.MessageID, "from", ev.From, "text", ev.Text, "context_token", ev.ReplyTarget.MetadataValue("context_token"))
 					}
 					if m.onEvent != nil {
 						m.onEvent(ev)

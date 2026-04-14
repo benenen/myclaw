@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,21 +20,21 @@ import (
 	"github.com/benenen/myclaw/internal/agent"
 )
 
-func TestStripANSI(t *testing.T) {
-	got := stripANSI("\x1b[31mhello\x1b[0m\r\n")
+func TestNormalizeOutputStripsANSI(t *testing.T) {
+	got := normalizeOutput("\x1b[31mhello\x1b[0m\r\n")
 	if got != "hello\n" {
-		t.Fatalf("stripANSI() = %q", got)
+		t.Fatalf("normalizeOutput() = %q", got)
 	}
 }
 
-func TestStripANSI_OSCSequence(t *testing.T) {
-	got := stripANSI("prefix\x1b]0;window title\x07suffix")
+func TestNormalizeOutputStripsOSCSequence(t *testing.T) {
+	got := normalizeOutput("prefix\x1b]0;window title\x07suffix")
 	if got != "prefixsuffix" {
-		t.Fatalf("stripANSI() = %q", got)
+		t.Fatalf("normalizeOutput() = %q", got)
 	}
 }
 
-func TestStripANSI_StringControlSequences(t *testing.T) {
+func TestNormalizeOutputStripsStringControlSequences(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -46,15 +47,15 @@ func TestStripANSI_StringControlSequences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(tt.input)
+			got := normalizeOutput(tt.input)
 			if got != "prefixsuffix" {
-				t.Fatalf("stripANSI() = %q", got)
+				t.Fatalf("normalizeOutput() = %q", got)
 			}
 		})
 	}
 }
 
-func TestStripANSI_SingleCharacterEscapeSequences(t *testing.T) {
+func TestNormalizeOutputStripsSingleCharacterEscapeSequences(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -69,15 +70,15 @@ func TestStripANSI_SingleCharacterEscapeSequences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(tt.input)
+			got := normalizeOutput(tt.input)
 			if got != "prefixsuffix" {
-				t.Fatalf("stripANSI() = %q", got)
+				t.Fatalf("normalizeOutput() = %q", got)
 			}
 		})
 	}
 }
 
-func TestStripANSI_TwoByteCharsetEscapeSequences(t *testing.T) {
+func TestNormalizeOutputStripsTwoByteCharsetEscapeSequences(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -90,9 +91,9 @@ func TestStripANSI_TwoByteCharsetEscapeSequences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(tt.input)
+			got := normalizeOutput(tt.input)
 			if got != "prefixsuffix" {
-				t.Fatalf("stripANSI() = %q", got)
+				t.Fatalf("normalizeOutput() = %q", got)
 			}
 		})
 	}
@@ -100,32 +101,27 @@ func TestStripANSI_TwoByteCharsetEscapeSequences(t *testing.T) {
 
 func TestNormalizeOutput(t *testing.T) {
 	got := normalizeOutput("a\r\nb\rc")
-	if got != "a\nb\nc" {
+	if got != "a\nc" {
 		t.Fatalf("normalizeOutput() = %q", got)
 	}
 }
 
-func TestFindMarkerRequiresOwnLine(t *testing.T) {
-	idx := findMarker("before __MYCLAW_END_123__ after", "__MYCLAW_END_123__")
-	if idx >= 0 {
-		t.Fatalf("findMarker() = %d, want no match for inline marker", idx)
-	}
-
-	idx = findMarker("before\n__MYCLAW_END_123__\nafter", "__MYCLAW_END_123__")
-	if idx < 0 {
-		t.Fatal("expected marker index for line-delimited marker")
+func TestNormalizeOutputHandlesSplitOSCSequence(t *testing.T) {
+	var out bytes.Buffer
+	var sanitizer terminalSanitizer
+	got1 := sanitizer.Write(&out, []byte("prefix\x1b]0;window"))
+	got2 := sanitizer.Write(&out, []byte(" title\x07suffix"))
+	if got1 != "prefix" || got2 != "suffix" || out.String() != "prefixsuffix" {
+		t.Fatalf("stream sanitize got1=%q got2=%q full=%q", got1, got2, out.String())
 	}
 }
 
-func TestHasPromptRequiresDedicatedPromptLine(t *testing.T) {
-	if prompt, ok := hasPrompt("status > running\nnext line\n"); ok {
-		t.Fatalf("hasPrompt() = %q, true; want no prompt", prompt)
-	}
-	if prompt, ok := hasPrompt("prefix codex> suffix\n"); ok {
-		t.Fatalf("hasPrompt() = %q, true; want no prompt", prompt)
-	}
-	if prompt, ok := hasPrompt("booting\ncodex>\n"); !ok || prompt != "codex>" {
-		t.Fatalf("hasPrompt() = %q, %v; want codex prompt", prompt, ok)
+func TestNormalizeOutputHandlesCarriageReturnRewrite(t *testing.T) {
+	var out bytes.Buffer
+	var sanitizer terminalSanitizer
+	sanitizer.Write(&out, []byte("T\rTi\rTip\rTip: hello\n"))
+	if got := out.String(); got != "Tip: hello\n" {
+		t.Fatalf("stream sanitize = %q", got)
 	}
 }
 
@@ -137,65 +133,6 @@ func TestPromptIndexOnOwnLine(t *testing.T) {
 	}
 	if got := text[idx:]; !strings.HasPrefix(got, "codex>") {
 		t.Fatalf("promptIndexOnOwnLine() pointed to %q", got)
-	}
-}
-
-func TestExtractRunResultIgnoresInlineMarkerSubstring(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"assistant mentions __MYCLAW_END_1__ inline",
-		marker,
-		"codex>",
-	}, "\n")
-
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "")
-	if !completed || ambiguous {
-		t.Fatalf("extractRunResult() completed=%v ambiguous=%v", completed, ambiguous)
-	}
-	if result.text != "assistant mentions __MYCLAW_END_1__ inline" {
-		t.Fatalf("extractRunResult() text = %q", result.text)
-	}
-}
-
-func TestExtractRunResultWaitsForPromptAfterMarker(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"answer",
-		marker,
-		"status codex> still output",
-	}, "\n")
-
-	completed, _, ambiguous := extractRunResult(text, 0, marker, "codex>", "")
-	if completed || ambiguous {
-		t.Fatalf("extractRunResult() = completed %v ambiguous %v, want incomplete", completed, ambiguous)
-	}
-}
-
-func TestBuildRunPayloadMatchesHelperProtocol(t *testing.T) {
-	payload := buildRunPayload("say hello", "__MYCLAW_END_1__")
-	want := "__MYCLAW_END_1__\nsay hello\n__MYCLAW_END_1__\n"
-	if payload != want {
-		t.Fatalf("buildRunPayload() = %q, want %q", payload, want)
-	}
-}
-
-func TestExtractRunResultMatchesHelperProtocol(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"say hello",
-		marker,
-		marker,
-		"codex>",
-	}, "\n")
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "say hello")
-	if !completed || ambiguous {
-		t.Fatalf("extractRunResult() completed=%v ambiguous=%v text=%q raw=%q", completed, ambiguous, result.text, result.raw)
-	}
-	if result.text != "assistant response: say hello" {
-		t.Fatalf("extractRunResult() text = %q raw=%q", result.text, result.raw)
 	}
 }
 
@@ -223,137 +160,24 @@ func TestWaitRunCompletionStateReturnsReadError(t *testing.T) {
 	}
 }
 
-func TestHelperProtocolFixture(t *testing.T) {
-	got := strings.Join([]string{
-		"codex>",
-		"__MYCLAW_END_1__",
-		"say hello",
-		"__MYCLAW_END_1__",
-		"assistant response: say hello",
-		"__MYCLAW_END_1__",
-		"codex>",
-	}, "\n") + "\n"
-	if !strings.Contains(got, "__MYCLAW_END_1__\nsay hello\n__MYCLAW_END_1__\nassistant response: say hello\n__MYCLAW_END_1__\ncodex>\n") {
-		t.Fatalf("helper protocol fixture = %q", got)
-	}
-}
-
-func TestOutputEndBoundaryMatchesPromptLine(t *testing.T) {
-	text := "assistant response: say hello\ncodex>\n"
-	idx, ok := outputEndBoundary(text, "codex>", 0)
-	if !ok || idx != len("assistant response: say hello\n") {
-		t.Fatalf("outputEndBoundary() idx=%d ok=%v", idx, ok)
-	}
-}
-
-func TestClosingMarkerBoundaryFindsFirstMarkerAfterPayload(t *testing.T) {
+func TestExtractRunResultWaitsForPrompt(t *testing.T) {
 	text := strings.Join([]string{
-		"__MYCLAW_END_1__",
-		"say hello",
-		"__MYCLAW_END_1__",
-		"assistant response: say hello",
-		"__MYCLAW_END_1__",
-		"codex>",
+		"answer",
+		"status codex> still output",
 	}, "\n")
-	_, payloadEnd, ok := payloadBoundary(text, 0, "__MYCLAW_END_1__")
-	if !ok {
-		t.Fatal("payloadBoundary() failed")
-	}
-	idx, _, ok := closingMarkerBoundary(text, "__MYCLAW_END_1__", payloadEnd)
-	if !ok || idx != len("__MYCLAW_END_1__\nsay hello\n") {
-		t.Fatalf("closingMarkerBoundary() idx=%d ok=%v", idx, ok)
+
+	completed, _, ambiguous := extractRunResult(text, 0, "codex>", "")
+	if completed || ambiguous {
+		t.Fatalf("extractRunResult() = completed %v ambiguous %v, want incomplete", completed, ambiguous)
 	}
 }
 
-func TestClosingMarkerBoundaryAfterEchoFindsFinalMarker(t *testing.T) {
+func TestExtractRunResultMatchesTranscript(t *testing.T) {
 	text := strings.Join([]string{
 		"assistant response: say hello",
-		"__MYCLAW_END_1__",
 		"codex>",
 	}, "\n")
-	idx, _, ok := closingMarkerBoundary(text, "__MYCLAW_END_1__", 0)
-	if !ok || text[idx:] == "" || !strings.HasPrefix(text[idx:], "__MYCLAW_END_1__\ncodex>") {
-		t.Fatalf("closingMarkerBoundary() idx=%d ok=%v tail=%q", idx, ok, text[idx:])
-	}
-}
-
-func TestHelperProtocolBodyStartsAfterEchoMarker(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"say hello",
-		marker,
-		"assistant response: say hello",
-		marker,
-		"codex>",
-	}, "\n")
-	_, payloadEnd, ok := payloadBoundary(text, 0, marker)
-	if !ok {
-		t.Fatal("payloadBoundary() failed")
-	}
-	idx, _, ok := closingMarkerBoundary(text, marker, payloadEnd)
-	if !ok {
-		t.Fatal("closingMarkerBoundary() failed")
-	}
-	if body := text[markerLineEnd(text, idx, marker):]; !strings.HasPrefix(body, "assistant response: say hello\n__MYCLAW_END_1__\ncodex>") {
-		t.Fatalf("body = %q", body)
-	}
-}
-
-func TestSliceRunOutputWithHelperProtocolSegment(t *testing.T) {
-	text := strings.Join([]string{"prefix", "assistant response: say hello", "__MYCLAW_END_1__", "codex>"}, "\n")
-	out, err := sliceRunOutput(text, len("prefix\n"), "__MYCLAW_END_1__")
-	if err != nil || out != "assistant response: say hello\n" {
-		t.Fatalf("sliceRunOutput() out=%q err=%v", out, err)
-	}
-}
-
-func TestHelperProtocolBodySliceStartsAfterEchoMarker(t *testing.T) {
-	text := strings.Join([]string{"__MYCLAW_END_1__", "say hello", "__MYCLAW_END_1__", "assistant response: say hello", "__MYCLAW_END_1__", "codex>"}, "\n")
-	_, payloadEnd, ok := payloadBoundary(text, 0, "__MYCLAW_END_1__")
-	if !ok {
-		t.Fatal("payloadBoundary() failed")
-	}
-	idx, _, ok := closingMarkerBoundary(text, "__MYCLAW_END_1__", payloadEnd)
-	if !ok {
-		t.Fatal("closingMarkerBoundary() failed")
-	}
-	out, err := sliceRunOutput(text, markerLineEnd(text, idx, "__MYCLAW_END_1__"), "__MYCLAW_END_1__")
-	if err != nil || out != "assistant response: say hello\n" {
-		t.Fatalf("sliceRunOutput() out=%q err=%v", out, err)
-	}
-}
-
-func TestExtractRunResultMatchesHelperProtocolWithPromptEcho(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"say hello",
-		marker,
-		"say hello",
-		marker,
-		"codex>",
-	}, "\n")
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "say hello")
-	if !completed || ambiguous {
-		t.Fatalf("extractRunResult() completed=%v ambiguous=%v text=%q raw=%q", completed, ambiguous, result.text, result.raw)
-	}
-	if result.text != "say hello" {
-		t.Fatalf("extractRunResult() text = %q raw=%q", result.text, result.raw)
-	}
-}
-
-func TestExtractRunResultMatchesHelperProtocolWithAssistantBody(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	text := strings.Join([]string{
-		marker,
-		"say hello",
-		marker,
-		"assistant response: say hello",
-		marker,
-		"codex>",
-	}, "\n")
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "say hello")
+	completed, result, ambiguous := extractRunResult(text, 0, "codex>", "say hello")
 	if !completed || ambiguous {
 		t.Fatalf("extractRunResult() completed=%v ambiguous=%v text=%q raw=%q", completed, ambiguous, result.text, result.raw)
 	}
@@ -362,18 +186,32 @@ func TestExtractRunResultMatchesHelperProtocolWithAssistantBody(t *testing.T) {
 	}
 }
 
-func TestExtractRunResultPreservesPromptLikeOutput(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
+func TestHelperTranscriptFixture(t *testing.T) {
+	got := "assistant response: say hello\ncodex>\n"
+	if !strings.Contains(got, "assistant response: say hello\ncodex>\n") {
+		t.Fatalf("helper transcript fixture = %q", got)
+	}
+}
+
+func TestNormalizeRunSegmentDropsEchoedPrompt(t *testing.T) {
 	text := strings.Join([]string{
-		marker,
-		"check prompt-like text",
-		marker,
-		"ordinary output: codex> appears inside text",
-		"assistant response: check prompt-like text",
-		marker,
+		"say hello",
+		"assistant response: say hello",
 		"codex>",
 	}, "\n")
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "check prompt-like text")
+	got := normalizeRunSegment(strings.TrimSuffix(text, "\ncodex>"), "say hello")
+	if got != "assistant response: say hello" {
+		t.Fatalf("normalizeRunSegment() = %q", got)
+	}
+}
+
+func TestExtractRunResultPreservesPromptLikeOutput(t *testing.T) {
+	text := strings.Join([]string{
+		"ordinary output: codex> appears inside text",
+		"assistant response: check prompt-like text",
+		"codex>",
+	}, "\n")
+	completed, result, ambiguous := extractRunResult(text, 0, "codex>", "check prompt-like text")
 	if !completed || ambiguous {
 		t.Fatalf("extractRunResult() completed=%v ambiguous=%v text=%q raw=%q", completed, ambiguous, result.text, result.raw)
 	}
@@ -385,18 +223,13 @@ func TestExtractRunResultPreservesPromptLikeOutput(t *testing.T) {
 	}
 }
 
-func TestExtractRunResultPreservesMarkerSubstringInBody(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
+func TestExtractRunResultPreservesMarkerLikeSubstringInBody(t *testing.T) {
 	text := strings.Join([]string{
-		marker,
-		"marker echo",
-		marker,
 		"echoed marker substring __MYCLAW_END_1__ in text",
 		"assistant response: marker echo",
-		marker,
 		"codex>",
 	}, "\n")
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", "marker echo")
+	completed, result, ambiguous := extractRunResult(text, 0, "codex>", "marker echo")
 	if !completed || ambiguous {
 		t.Fatalf("extractRunResult() completed=%v ambiguous=%v text=%q raw=%q", completed, ambiguous, result.text, result.raw)
 	}
@@ -408,54 +241,10 @@ func TestExtractRunResultPreservesMarkerSubstringInBody(t *testing.T) {
 	}
 }
 
-func TestExtractRunResultStripsPromptEchoProtocolNoise(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	promptText := "say hello"
-	text := strings.Join([]string{
-		marker,
-		promptText,
-		marker,
-		promptText,
-		marker,
-		"codex>",
-	}, "\n")
-
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", promptText)
-	if !completed || ambiguous {
-		t.Fatalf("extractRunResult() completed=%v ambiguous=%v", completed, ambiguous)
-	}
-	if result.text != promptText {
-		t.Fatalf("extractRunResult() text = %q raw=%q", result.text, result.raw)
-	}
-}
-
-func TestExtractRunResultStripsAssistantProtocolNoise(t *testing.T) {
-	marker := "__MYCLAW_END_1__"
-	promptText := "say hello"
-	text := strings.Join([]string{
-		marker,
-		promptText,
-		marker,
-		"assistant response: " + promptText,
-		marker,
-		"codex>",
-	}, "\n")
-
-	completed, result, ambiguous := extractRunResult(text, 0, marker, "codex>", promptText)
-	if !completed || ambiguous {
-		t.Fatalf("extractRunResult() completed=%v ambiguous=%v", completed, ambiguous)
-	}
-	if result.text != "assistant response: say hello" {
-		t.Fatalf("extractRunResult() text = %q raw=%q", result.text, result.raw)
-	}
-}
-
-func TestSliceRunOutputWithHelperProtocolSegmentAfterEcho(t *testing.T) {
-	text := strings.Join([]string{"__MYCLAW_END_1__", "say hello", "__MYCLAW_END_1__", "assistant response: say hello", "__MYCLAW_END_1__", "codex>"}, "\n")
-	start := len("__MYCLAW_END_1__\nsay hello\n__MYCLAW_END_1__\n")
-	out, err := sliceRunOutput(text, start, "__MYCLAW_END_1__")
-	if err != nil || out != "assistant response: say hello\n" {
-		t.Fatalf("sliceRunOutput() out=%q err=%v", out, err)
+func TestNormalizeRunSegmentDropsLeadingPrompt(t *testing.T) {
+	got := normalizeRunSegment("codex>\nassistant response: say hello\n", "")
+	if got != "assistant response: say hello" {
+		t.Fatalf("normalizeRunSegment() = %q", got)
 	}
 }
 
@@ -463,13 +252,6 @@ func TestCleanupRunTextRemovesLeadingUserEcho(t *testing.T) {
 	got := cleanupRunText("user input: say hello\nassistant response: say hello\n")
 	if got != "assistant response: say hello" {
 		t.Fatalf("cleanupRunText() = %q", got)
-	}
-}
-
-func TestBuildRunPayloadIncludesPromptBetweenMarkers(t *testing.T) {
-	payload := buildRunPayload("say hello", "__MYCLAW_END_1__")
-	if !strings.Contains(payload, "__MYCLAW_END_1__\nsay hello\n__MYCLAW_END_1__") {
-		t.Fatalf("buildRunPayload() = %q", payload)
 	}
 }
 
@@ -538,65 +320,6 @@ func TestTimeoutRunBoundsNonCooperativeWait(t *testing.T) {
 	}
 }
 
-func TestSliceRunOutput(t *testing.T) {
-	out, err := sliceRunOutput("prefix\nanswer\n__MYCLAW_END_1__\ncodex> ", len("prefix\n"), "__MYCLAW_END_1__")
-	if err != nil {
-		t.Fatalf("sliceRunOutput() error = %v", err)
-	}
-	if out != "answer\n" {
-		t.Fatalf("sliceRunOutput() = %q", out)
-	}
-}
-
-func TestSliceRunOutputRejectsEmptyMarker(t *testing.T) {
-	_, err := sliceRunOutput("output", 0, "")
-	if err == nil || !strings.Contains(err.Error(), "marker must not be empty") {
-		t.Fatalf("sliceRunOutput() error = %v, want empty marker error", err)
-	}
-}
-
-func TestSliceRunOutputMissingMarker(t *testing.T) {
-	_, err := sliceRunOutput("output", 0, "__MYCLAW_END_1__")
-	if err == nil || !strings.Contains(err.Error(), "marker not found") {
-		t.Fatalf("sliceRunOutput() error = %v, want missing marker error", err)
-	}
-}
-
-func TestSliceRunOutputInvalidStartOffset(t *testing.T) {
-	_, err := sliceRunOutput("output", -1, "__MYCLAW_END_1__")
-	if err == nil || !strings.Contains(err.Error(), "invalid start offset") {
-		t.Fatalf("sliceRunOutput() error = %v, want invalid start offset error", err)
-	}
-}
-
-func TestSliceRunOutputMarkerAtStartOffset(t *testing.T) {
-	out, err := sliceRunOutput("__MYCLAW_END_1__\ncodex> ", 0, "__MYCLAW_END_1__")
-	if err != nil {
-		t.Fatalf("sliceRunOutput() error = %v", err)
-	}
-	if out != "" {
-		t.Fatalf("sliceRunOutput() = %q, want empty output", out)
-	}
-}
-
-func TestSliceRunOutputMarkerAtExactIndexAfterStart(t *testing.T) {
-	text := "prefix\n__MYCLAW_END_1__\ncodex> "
-	out, err := sliceRunOutput(text, len("prefix\n"), "__MYCLAW_END_1__")
-	if err != nil {
-		t.Fatalf("sliceRunOutput() error = %v", err)
-	}
-	if out != "" {
-		t.Fatalf("sliceRunOutput() = %q, want empty output", out)
-	}
-}
-
-func TestSliceRunOutputInvalidStartOffsetPastEnd(t *testing.T) {
-	_, err := sliceRunOutput("output", len("output")+1, "__MYCLAW_END_1__")
-	if err == nil || !strings.Contains(err.Error(), "invalid start offset") {
-		t.Fatalf("sliceRunOutput() error = %v, want invalid start offset error", err)
-	}
-}
-
 func TestPTYDriverRegistersCodexPTY(t *testing.T) {
 	driver, ok := agent.LookupDriver("codex-pty")
 	if !ok {
@@ -636,19 +359,16 @@ func TestPTYDriverInitStartsReadyRuntime(t *testing.T) {
 			t.Fatalf("close() error = %v", err)
 		}
 	}()
-	if ptyRuntime.state != stateReady {
-		t.Fatalf("runtime state = %s, want ready", ptyRuntime.state)
-	}
-	if ptyRuntime.prompt != "codex>" {
-		t.Fatalf("runtime prompt = %q, want codex>", ptyRuntime.prompt)
+	if ptyRuntime.state != stateStarting {
+		t.Fatalf("runtime state = %s, want starting", ptyRuntime.state)
 	}
 }
 
-func TestPTYDriverInitCleansUpProcessOnReadyTimeout(t *testing.T) {
+func TestPTYDriverInitDoesNotWaitForReady(t *testing.T) {
 	pidFile := helperPIDFile(t, "silent-block")
 
 	driver := NewPTYDriver()
-	_, err := driver.Init(context.Background(), agent.Spec{
+	runtime, err := driver.Init(context.Background(), agent.Spec{
 		Type:    "codex-pty",
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestHelperProcessCodexPTY", "--", "silent-block"},
@@ -658,41 +378,51 @@ func TestPTYDriverInitCleansUpProcessOnReadyTimeout(t *testing.T) {
 		},
 		Timeout: 100 * time.Millisecond,
 	})
-	if err == nil {
-		t.Fatal("expected timeout error")
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	ptyRuntime := runtime.(*PTYRuntime)
+	defer closeRuntime(t, ptyRuntime)
+	if ptyRuntime.state != stateStarting {
+		t.Fatalf("runtime state = %s, want starting", ptyRuntime.state)
 	}
 
-	pidBytes, readErr := os.ReadFile(pidFile)
-	if readErr != nil {
-		t.Fatalf("ReadFile(%q) error = %v", pidFile, readErr)
-	}
-
-	pid, scanErr := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
-	if scanErr != nil {
-		t.Fatalf("Atoi(pid) error = %v", scanErr)
-	}
-
+	pid := waitForHelperPID(t, pidFile)
 	process, findErr := os.FindProcess(pid)
 	if findErr != nil {
 		t.Fatalf("FindProcess(%d) error = %v", pid, findErr)
 	}
-	if signalErr := process.Signal(syscall.Signal(0)); signalErr == nil {
-		t.Fatalf("helper process %d still alive after Init failure", pid)
+	if signalErr := process.Signal(syscall.Signal(0)); signalErr != nil {
+		t.Fatalf("helper process %d not alive after Init success: %v", pid, signalErr)
 	}
 }
 
 func TestPTYDriverInitFailsWhenChildExitsBeforePrompt(t *testing.T) {
 	driver := NewPTYDriver()
-	_, err := driver.Init(context.Background(), agent.Spec{
+	runtime, err := driver.Init(context.Background(), agent.Spec{
 		Type:    "codex-pty",
 		Command: os.Args[0],
 		Args:    []string{"-test.run=TestHelperProcessCodexPTY", "--", "exit-before-prompt"},
 		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
 		Timeout: 2 * time.Second,
 	})
-	if !errors.Is(err, io.EOF) {
-		t.Fatalf("Init() error = %v, want io.EOF", err)
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
 	}
+	ptyRuntime := runtime.(*PTYRuntime)
+	defer closeRuntime(t, ptyRuntime)
+
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		ptyRuntime.mu.Lock()
+		readErr := ptyRuntime.readErr
+		state := ptyRuntime.state
+		ptyRuntime.mu.Unlock()
+		if errors.Is(readErr, io.EOF) && state == stateBroken {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected runtime to break with EOF after child exited")
 }
 
 func TestPTYRuntimeRunSuccessfulSingleRequest(t *testing.T) {
@@ -711,6 +441,37 @@ func TestPTYRuntimeRunSuccessfulSingleRequest(t *testing.T) {
 	}
 	if runtime.state != stateReady {
 		t.Fatalf("runtime state = %s, want ready", runtime.state)
+	}
+}
+
+func TestPTYRuntimeRunTransitionsStartingRuntimeToReady(t *testing.T) {
+	driver := NewPTYDriver()
+	sessionRuntime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    "codex-pty",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessCodexPTY", "--", "run-success"},
+		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	runtime := sessionRuntime.(*PTYRuntime)
+	defer closeRuntime(t, runtime)
+
+	if runtime.state != stateStarting {
+		t.Fatalf("runtime state = %s, want starting before first run", runtime.state)
+	}
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "say hello"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "assistant response: say hello" {
+		t.Fatalf("Run() text = %q raw=%q", resp.Text, resp.RawOutput)
+	}
+	if runtime.state != stateReady {
+		t.Fatalf("runtime state = %s, want ready after run", runtime.state)
 	}
 }
 
@@ -795,16 +556,31 @@ func TestPTYRuntimeRunCallerCancellationKeepsHealthyRuntime(t *testing.T) {
 	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("Run() error = %v, want caller cancellation", err)
 	}
-	if runtime.state != stateReady {
-		t.Fatalf("runtime state = %s, want ready", runtime.state)
+	if runtime.state != stateRunning {
+		t.Fatalf("runtime state = %s, want running while canceled run drains", runtime.state)
 	}
 
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); {
+		runtime.mu.Lock()
+		state := runtime.state
+		runtime.mu.Unlock()
+		if state == stateReady {
+			goto ready
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected runtime to return to ready after canceled run drained")
+
+ready:
 	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "after cancel"})
 	if err != nil {
 		t.Fatalf("Run() after caller cancel error = %v", err)
 	}
-	if resp.Text != "after cancel" {
+	if resp.Text != "assistant response: after cancel" {
 		t.Fatalf("Run() after caller cancel text = %q raw=%q", resp.Text, resp.RawOutput)
+	}
+	if strings.Contains(resp.RawOutput, "slow success") {
+		t.Fatalf("Run() after caller cancel raw=%q, want prior canceled output removed", resp.RawOutput)
 	}
 }
 
@@ -1187,14 +963,14 @@ func TestHelperProcessCodexPTY(t *testing.T) {
 	switch mode {
 	case "ready-only":
 		fmt.Println("codex>")
-		select {}
+		blockForever()
 	case "silent-block":
 		if pidFile := os.Getenv("GO_HELPER_PID_FILE"); pidFile != "" {
 			if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 				os.Exit(3)
 			}
 		}
-		select {}
+		blockForever()
 	case "self-exit":
 		if pidFile := os.Getenv("GO_HELPER_PID_FILE"); pidFile != "" {
 			if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
@@ -1209,7 +985,7 @@ func TestHelperProcessCodexPTY(t *testing.T) {
 		os.Exit(0)
 	case "ready-then-block":
 		fmt.Println("codex>")
-		select {}
+		blockForever()
 	case "run-success":
 		helperRunLoop(func(prompt string) helperRunAction {
 			return helperRunAction{output: "assistant response: " + prompt + "\n"}
@@ -1230,7 +1006,7 @@ func TestHelperProcessCodexPTY(t *testing.T) {
 			input := string(buf[:n])
 			if strings.Contains(input, "stall forever") {
 				fmt.Print("working...\n")
-				select {}
+				blockForever()
 			}
 		}
 	case "run-eof":
@@ -1271,9 +1047,6 @@ func helperRunLoop(handle func(string) helperRunAction) {
 	fmt.Println("codex>")
 
 	buffer := ""
-	haveStart := false
-	var promptText string
-	var marker string
 	for {
 		chunk := make([]byte, 256)
 		n, err := os.Stdin.Read(chunk)
@@ -1291,21 +1064,7 @@ func helperRunLoop(handle func(string) helperRunAction) {
 			if line == "" {
 				continue
 			}
-			if !haveStart {
-				if strings.HasPrefix(line, "__MYCLAW_END_") {
-					haveStart = true
-					marker = line
-				}
-				continue
-			}
-			if promptText == "" {
-				promptText = line
-				continue
-			}
-			if line != marker {
-				continue
-			}
-
+			promptText := line
 			action := handle(promptText)
 			if action.exitAfter {
 				if action.output != "" {
@@ -1313,14 +1072,17 @@ func helperRunLoop(handle func(string) helperRunAction) {
 				}
 				os.Exit(0)
 			}
-			fmt.Print(helperTranscriptShape(promptText, marker, action.output))
+			fmt.Print(helperTranscriptShape(promptText, action.output))
 			if action.holdOpen {
-				select {}
+				blockForever()
 			}
-			haveStart = false
-			promptText = ""
-			marker = ""
 		}
+	}
+}
+
+func blockForever() {
+	for {
+		time.Sleep(time.Second)
 	}
 }
 

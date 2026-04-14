@@ -18,6 +18,7 @@ var ErrMissingReplyRecipient = errors.New("wechat reply target recipient_id is r
 var ErrMissingReplyBaseURL = errors.New("wechat reply target metadata base_url is required")
 var ErrMissingReplyToken = errors.New("wechat reply target metadata token is required")
 var ErrMissingReplyWechatUIN = errors.New("wechat reply target metadata wechat_uin is required")
+var ErrMissingReplyContextToken = errors.New("wechat reply target metadata context_token is required")
 
 type ReplyGateway struct {
 	client messageSender
@@ -35,6 +36,9 @@ func validateReplyTarget(target channel.ReplyTarget) error {
 	}
 	if strings.TrimSpace(target.MetadataValue("wechat_uin")) == "" {
 		return ErrMissingReplyWechatUIN
+	}
+	if strings.TrimSpace(target.MetadataValue("context_token")) == "" {
+		return ErrMissingReplyContextToken
 	}
 	return nil
 }
@@ -60,11 +64,12 @@ func (g *ReplyGateway) Reply(ctx context.Context, target channel.ReplyTarget, re
 		return err
 	}
 	if err := g.client.SendTextMessage(ctx, SendMessageOptions{
-		BaseURL:   trimmedMetadataValue(target, "base_url"),
-		Token:     trimmedMetadataValue(target, "token"),
-		WechatUIN: trimmedMetadataValue(target, "wechat_uin"),
-		ToUserID:  trimmedRecipientID(target),
-		Text:      text,
+		BaseURL:      trimmedMetadataValue(target, "base_url"),
+		Token:        trimmedMetadataValue(target, "token"),
+		WechatUIN:    trimmedMetadataValue(target, "wechat_uin"),
+		ToUserID:     trimmedRecipientID(target),
+		Text:         text,
+		ContextToken: trimmedMetadataValue(target, "context_token"),
 	}); err != nil {
 		return fmt.Errorf("wechat reply: %w", err)
 	}

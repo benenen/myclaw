@@ -10,6 +10,7 @@ import (
 	"github.com/benenen/myclaw/internal/api/http/handlers"
 	"github.com/benenen/myclaw/internal/api/http/web"
 	"github.com/benenen/myclaw/internal/app/bot"
+	"github.com/benenen/myclaw/internal/app/capability"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
@@ -20,7 +21,10 @@ import (
 	"github.com/benenen/myclaw/internal/store/repositories"
 )
 
-const botCLITimeout = 60 * time.Second
+const (
+	botCLITimeout       = 60 * time.Second
+	botCodexExecTimeout = 10 * time.Minute
+)
 
 type App struct {
 	Config  config.Config
@@ -55,13 +59,18 @@ func New(cfg config.Config) (*App, error) {
 
 	executor := agent.NewManager()
 	replyGateway := wechat.NewReplyGateway(wechatClient)
-	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{Timeout: botCLITimeout})
+	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
+		Timeout:          botCLITimeout,
+		CodexExecTimeout: botCodexExecTimeout,
+	})
 	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
 	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, provider, botManager)
+	discoverer := capability.NewAgentCapabilityDiscoverer(capabilityRepo, nil)
+	botSvc.SetCapabilityDiscoverer(discoverer)
 
 	mux := stdhttp.NewServeMux()
 	mux.HandleFunc("/healthz", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
@@ -74,6 +83,10 @@ func New(cfg config.Config) (*App, error) {
 		BotService:       botSvc,
 		MessageSimulator: messageSimulator,
 	})
+
+	if _, err := discoverer.Refresh(context.Background()); err != nil {
+		logger.Info("agent capability refresh failed", "error", err)
+	}
 
 	go func() {
 		ctx := context.Background()

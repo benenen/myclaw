@@ -19,10 +19,13 @@ func ListAgentCapabilities(svc *botapp.BotService) stdhttp.HandlerFunc {
 		resp := make([]dto.AgentCapabilityResponse, 0, len(items))
 		for _, item := range items {
 			resp = append(resp, dto.AgentCapabilityResponse{
-				ID:             item.ID,
-				Key:            item.Key,
-				Label:          item.Label,
-				SupportedModes: item.SupportedModes,
+				ID:              item.ID,
+				Key:             item.Key,
+				Label:           item.Label,
+				Command:         item.Command,
+				Available:       item.Available,
+				DetectionSource: item.DetectionSource,
+				SupportedModes:  item.SupportedModes,
 			})
 		}
 		httpapi.WriteOKFromRequest(w, r, resp)

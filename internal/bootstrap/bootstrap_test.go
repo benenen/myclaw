@@ -78,7 +78,7 @@ func TestBootstrapUsesRegisteredDriverTypeForBotCLI(t *testing.T) {
 	if _, ok := agent.LookupDriver("codex-pty"); !ok {
 		t.Fatal("expected codex-pty driver registration for bootstrap wiring")
 	}
-	if _, ok := agent.LookupDriver("oneshot"); ok {
-		t.Fatal("did not expect legacy oneshot driver registration in bootstrap wiring")
+	if _, ok := agent.LookupDriver("codex-exec"); !ok {
+		t.Fatal("expected codex-exec driver registration for bootstrap wiring")
 	}
 }

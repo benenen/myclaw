@@ -10,14 +10,19 @@ import (
 )
 
 type BotService struct {
-	users        domain.UserRepository
-	bots         domain.BotRepository
-	bindings     domain.ChannelBindingRepository
-	accounts     domain.ChannelAccountRepository
-	capabilities domain.AgentCapabilityRepository
-	cipher       *security.Cipher
-	provider     channel.Provider
-	runtimes     *BotConnectionManager
+	users                domain.UserRepository
+	bots                 domain.BotRepository
+	bindings             domain.ChannelBindingRepository
+	accounts             domain.ChannelAccountRepository
+	capabilities         domain.AgentCapabilityRepository
+	capabilityDiscoverer capabilityDiscoverer
+	cipher               *security.Cipher
+	provider             channel.Provider
+	runtimes             *BotConnectionManager
+}
+
+type capabilityDiscoverer interface {
+	Refresh(ctx context.Context) ([]domain.AgentCapability, error)
 }
 
 func NewBotService(
@@ -290,13 +295,21 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 }
 
 type AgentCapabilityListItem struct {
-	ID             string
-	Key            string
-	Label          string
-	SupportedModes []string
+	ID              string
+	Key             string
+	Label           string
+	Command         string
+	Available       bool
+	DetectionSource string
+	SupportedModes  []string
 }
 
 func (s *BotService) ListAgentCapabilities(ctx context.Context) ([]AgentCapabilityListItem, error) {
+	if s.capabilityDiscoverer != nil {
+		if _, err := s.capabilityDiscoverer.Refresh(ctx); err != nil {
+			return nil, err
+		}
+	}
 	capabilities, err := s.capabilities.List(ctx)
 	if err != nil {
 		return nil, err
@@ -304,13 +317,20 @@ func (s *BotService) ListAgentCapabilities(ctx context.Context) ([]AgentCapabili
 	items := make([]AgentCapabilityListItem, 0, len(capabilities))
 	for _, capability := range capabilities {
 		items = append(items, AgentCapabilityListItem{
-			ID:             capability.ID,
-			Key:            capability.Key,
-			Label:          capability.Label,
-			SupportedModes: append([]string(nil), capability.SupportedModes...),
+			ID:              capability.ID,
+			Key:             capability.Key,
+			Label:           capability.Label,
+			Command:         capability.Command,
+			Available:       capability.Available,
+			DetectionSource: capability.DetectionSource,
+			SupportedModes:  append([]string(nil), capability.SupportedModes...),
 		})
 	}
 	return items, nil
+}
+
+func (s *BotService) SetCapabilityDiscoverer(d capabilityDiscoverer) {
+	s.capabilityDiscoverer = d
 }
 
 func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (StartBotLoginOutput, error) {

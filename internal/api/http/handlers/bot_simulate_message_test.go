@@ -29,13 +29,13 @@ func TestSimulateBotMessageHandlerReturnsEnvelope(t *testing.T) {
 			From:        "user_1",
 			Text:        "hello",
 			MessageID:   "msg_1",
-			RecipientID: "user_1",
+			RecipientID: "wx_real_user_1",
 		},
 	}
 	mux := stdhttp.NewServeMux()
 	RegisterRoutes(mux, Dependencies{MessageSimulator: stub})
 
-	rr := testutil.PostJSON(t, mux, "/api/v1/bots/simulate-message", `{"bot_id":"bot_1","from":"user_1","text":"hello"}`)
+	rr := testutil.PostJSON(t, mux, "/api/v1/bots/simulate-message", `{"bot_id":"bot_1","from":"user_1","recipient_id":"wx_real_user_1","text":"hello"}`)
 	if rr.Code != stdhttp.StatusOK {
 		t.Fatalf("unexpected status: %d", rr.Code)
 	}
@@ -56,7 +56,7 @@ func TestSimulateBotMessageHandlerReturnsEnvelope(t *testing.T) {
 	if payload["message_id"] != "msg_1" {
 		t.Fatalf("unexpected message id: %#v", payload["message_id"])
 	}
-	if payload["recipient_id"] != "user_1" {
+	if payload["recipient_id"] != "wx_real_user_1" {
 		t.Fatalf("unexpected recipient id: %#v", payload["recipient_id"])
 	}
 }
@@ -66,5 +66,35 @@ func TestSimulateBotMessageHandlerRejectsMissingFields(t *testing.T) {
 	RegisterRoutes(mux, Dependencies{MessageSimulator: &simulateMessageServiceStub{}})
 
 	rr := testutil.PostJSON(t, mux, "/api/v1/bots/simulate-message", `{"bot_id":"bot_1"}`)
+	testutil.AssertJSONCode(t, rr, "INVALID_ARGUMENT")
+}
+
+func TestSimulateBotMessageHandlerPassesExplicitRecipientID(t *testing.T) {
+	stub := &simulateMessageServiceStub{
+		output: botapp.SimulateMessageOutput{
+			BotID:       "bot_1",
+			From:        "user_1",
+			Text:        "hello",
+			MessageID:   "msg_1",
+			RecipientID: "wx_real_user_1",
+		},
+	}
+	mux := stdhttp.NewServeMux()
+	RegisterRoutes(mux, Dependencies{MessageSimulator: stub})
+
+	rr := testutil.PostJSON(t, mux, "/api/v1/bots/simulate-message", `{"bot_id":"bot_1","from":"user_1","recipient_id":"wx_real_user_1","text":"hello"}`)
+	if rr.Code != stdhttp.StatusOK {
+		t.Fatalf("unexpected status: %d", rr.Code)
+	}
+	if stub.input.RecipientID != "wx_real_user_1" {
+		t.Fatalf("unexpected recipient id: %q", stub.input.RecipientID)
+	}
+}
+
+func TestSimulateBotMessageHandlerRequiresRecipientID(t *testing.T) {
+	mux := stdhttp.NewServeMux()
+	RegisterRoutes(mux, Dependencies{MessageSimulator: &simulateMessageServiceStub{}})
+
+	rr := testutil.PostJSON(t, mux, "/api/v1/bots/simulate-message", `{"bot_id":"bot_1","from":"user_1","text":"hello"}`)
 	testutil.AssertJSONCode(t, rr, "INVALID_ARGUMENT")
 }

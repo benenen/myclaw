@@ -132,6 +132,9 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 								"wechat_uin":  wechatUIN,
 							},
 						}
+						if msg.ContextToken != "" {
+							replyTarget.Metadata["context_token"] = msg.ContextToken
+						}
 						if req.Callbacks.OnEvent != nil {
 							req.Callbacks.OnEvent(channel.RuntimeEvent{
 								BotID:       req.BotID,

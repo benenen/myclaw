@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/benenen/myclaw/internal/logging"
@@ -24,12 +26,13 @@ type Client interface {
 }
 
 type Message struct {
-	MsgID   string
-	MsgType string
-	From    string
-	Text    string
-	Raw     []byte
-	Created int64
+	MsgID        string
+	MsgType      string
+	From         string
+	Text         string
+	ContextToken string
+	Raw          []byte
+	Created      int64
 }
 
 type GetUpdatesOptions struct {
@@ -50,11 +53,12 @@ type GetUpdatesResult struct {
 }
 
 type SendMessageOptions struct {
-	BaseURL   string
-	Token     string
-	WechatUIN string
-	ToUserID  string
-	Text      string
+	BaseURL      string
+	Token        string
+	WechatUIN    string
+	ToUserID     string
+	Text         string
+	ContextToken string
 }
 
 type getUpdatesRequest struct {
@@ -78,6 +82,7 @@ type weixinMessage struct {
 	MessageID    int64         `json:"message_id"`
 	FromUserID   string        `json:"from_user_id"`
 	ToUserID     string        `json:"to_user_id"`
+	ContextToken string        `json:"context_token"`
 	CreateTimeMS int64         `json:"create_time_ms"`
 	ItemList     []messageItem `json:"item_list"`
 }
@@ -680,9 +685,10 @@ func (c *HTTPClient) GetMessagesLongPoll(ctx context.Context, opts GetUpdatesOpt
 	}
 	for _, msg := range raw.Messages {
 		parsed := Message{
-			MsgID:   fmt.Sprintf("%d", msg.MessageID),
-			From:    msg.FromUserID,
-			Created: msg.CreateTimeMS,
+			MsgID:        fmt.Sprintf("%d", msg.MessageID),
+			From:         msg.FromUserID,
+			ContextToken: msg.ContextToken,
+			Created:      msg.CreateTimeMS,
 		}
 		for _, item := range msg.ItemList {
 			if item.MsgID != "" {
@@ -714,9 +720,27 @@ func (c *HTTPClient) SendTextMessage(ctx context.Context, opts SendMessageOption
 	if opts.Token != "" {
 		token = opts.Token
 	}
+	if strings.TrimSpace(opts.ContextToken) == "" {
+		return errors.New("sendmsg context token is required")
+	}
 	payload, err := json.Marshal(map[string]any{
-		"to_user_id": opts.ToUserID,
-		"text":       opts.Text,
+		"msg": map[string]any{
+			"from_user_id":  "",
+			"to_user_id":    opts.ToUserID,
+			"client_id":     fmt.Sprintf("myclaw-wechat-%d", time.Now().UnixNano()),
+			"message_type":  2,
+			"message_state": 2,
+			"item_list": []map[string]any{{
+				"type": 1,
+				"text_item": map[string]any{
+					"text": opts.Text,
+				},
+			}},
+			"context_token": opts.ContextToken,
+		},
+		"base_info": map[string]any{
+			"channel_version": "1.0.0",
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal sendmsg request: %w", err)
@@ -724,7 +748,7 @@ func (c *HTTPClient) SendTextMessage(ctx context.Context, opts SendMessageOption
 	requestCtx, cancel := contextWithDefaultTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+"/ilink/bot/sendmsg", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+"/ilink/bot/sendmessage", bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("create sendmsg request: %w", err)
 	}

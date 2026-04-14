@@ -58,17 +58,14 @@ func (s *MessageSimulator) Simulate(ctx context.Context, input SimulateMessageIn
 	from := strings.TrimSpace(input.From)
 	messageID := strings.TrimSpace(input.MessageID)
 	recipientID := strings.TrimSpace(input.RecipientID)
-	if botID == "" || from == "" || strings.TrimSpace(input.Text) == "" {
-		return SimulateMessageOutput{}, fmt.Errorf("bot_id, from and text are required: %w", domain.ErrInvalidArg)
+	if botID == "" || from == "" || recipientID == "" || strings.TrimSpace(input.Text) == "" {
+		return SimulateMessageOutput{}, fmt.Errorf("bot_id, from, recipient_id and text are required: %w", domain.ErrInvalidArg)
 	}
 	if s == nil || s.orchestrator == nil {
 		return SimulateMessageOutput{}, errors.New("message simulator orchestrator is required")
 	}
 	if messageID == "" {
 		messageID = domain.NewPrefixedID("msg")
-	}
-	if recipientID == "" {
-		recipientID = from
 	}
 
 	bot, err := s.bots.GetByID(ctx, botID)
@@ -96,7 +93,7 @@ func (s *MessageSimulator) Simulate(ctx context.Context, input SimulateMessageIn
 		return SimulateMessageOutput{}, err
 	}
 
-	s.orchestrator.HandleMessage(context.Background(), InboundMessage{
+	s.orchestrator.HandleMessage(ctx, InboundMessage{
 		BotID:       botID,
 		MessageID:   messageID,
 		From:        from,

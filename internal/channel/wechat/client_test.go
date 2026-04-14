@@ -229,7 +229,7 @@ func TestHTTPClientGetMessagesLongPollReturnsEnvelopeDetailsOnNon200JSONError(t 
 func TestHTTPClientSendTextMessage(t *testing.T) {
 	requestErrCh := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ilink/bot/sendmsg" {
+		if r.URL.Path != "/ilink/bot/sendmessage" {
 			requestErrCh <- fmt.Errorf("path = %s", r.URL.Path)
 			return
 		}
@@ -250,8 +250,37 @@ func TestHTTPClientSendTextMessage(t *testing.T) {
 			requestErrCh <- fmt.Errorf("decode body: %v", err)
 			return
 		}
-		if body["to_user_id"] != "user-1" || body["text"] != "hello" {
+		msg, ok := body["msg"].(map[string]any)
+		if !ok {
+			requestErrCh <- fmt.Errorf("msg = %#v", body["msg"])
+			return
+		}
+		items, ok := msg["item_list"].([]any)
+		if !ok || len(items) != 1 {
+			requestErrCh <- fmt.Errorf("item_list = %#v", msg["item_list"])
+			return
+		}
+		item, ok := items[0].(map[string]any)
+		if !ok {
+			requestErrCh <- fmt.Errorf("item = %#v", items[0])
+			return
+		}
+		textItem, ok := item["text_item"].(map[string]any)
+		if !ok {
+			requestErrCh <- fmt.Errorf("text_item = %#v", item["text_item"])
+			return
+		}
+		baseInfo, ok := body["base_info"].(map[string]any)
+		if !ok {
+			requestErrCh <- fmt.Errorf("base_info = %#v", body["base_info"])
+			return
+		}
+		if msg["to_user_id"] != "user-1" || msg["message_type"] != float64(2) || msg["message_state"] != float64(2) || textItem["text"] != "hello" || baseInfo["channel_version"] != "1.0.0" {
 			requestErrCh <- fmt.Errorf("body = %#v", body)
+			return
+		}
+		if _, ok := msg["client_id"].(string); !ok {
+			requestErrCh <- fmt.Errorf("client_id = %#v", msg["client_id"])
 			return
 		}
 		requestErrCh <- nil
@@ -260,7 +289,50 @@ func TestHTTPClientSendTextMessage(t *testing.T) {
 	defer server.Close()
 
 	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
-	if err := client.SendTextMessage(context.Background(), SendMessageOptions{Token: "token", WechatUIN: "uin", ToUserID: "user-1", Text: "hello"}); err != nil {
+	if err := client.SendTextMessage(context.Background(), SendMessageOptions{Token: "token", WechatUIN: "uin", ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"}); err != nil {
+		t.Fatalf("SendTextMessage() error = %v", err)
+	}
+	if err := <-requestErrCh; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPClientSendTextMessageRequiresContextToken(t *testing.T) {
+	client := &HTTPClient{baseURL: "http://127.0.0.1:1", authToken: "token", client: &http.Client{}, logger: logging.New("debug")}
+
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "context token") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPClientSendTextMessageIncludesContextToken(t *testing.T) {
+	requestErrCh := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			requestErrCh <- fmt.Errorf("decode body: %v", err)
+			return
+		}
+		msg, ok := body["msg"].(map[string]any)
+		if !ok {
+			requestErrCh <- fmt.Errorf("msg = %#v", body["msg"])
+			return
+		}
+		if msg["context_token"] != "ctx-1" {
+			requestErrCh <- fmt.Errorf("context_token = %#v", msg["context_token"])
+			return
+		}
+		requestErrCh <- nil
+		_, _ = w.Write([]byte(`{"ret":0,"errcode":0}`))
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
+	if err := client.SendTextMessage(context.Background(), SendMessageOptions{Token: "token", WechatUIN: "uin", ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"}); err != nil {
 		t.Fatalf("SendTextMessage() error = %v", err)
 	}
 	if err := <-requestErrCh; err != nil {
@@ -289,7 +361,7 @@ func TestHTTPClientSendTextMessageSetsDefaultTimeoutWithoutDeadline(t *testing.T
 		logger: logging.New("debug"),
 	}
 
-	if err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"}); err != nil {
+	if err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"}); err != nil {
 		t.Fatalf("SendTextMessage() error = %v", err)
 	}
 }
@@ -313,7 +385,7 @@ func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutExpires
 		logger: logging.New("debug"),
 	}
 
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -336,7 +408,7 @@ func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutAlready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 
-	err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -398,7 +470,7 @@ func TestHTTPClientSendTextMessageUsesDefaultTimeoutWhenTransportWaitsForCancell
 		logger: logging.New("debug"),
 	}
 
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -431,7 +503,7 @@ func TestHTTPClientSendTextMessagePreservesExistingDeadline(t *testing.T) {
 		logger: logging.New("debug"),
 	}
 
-	if err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello"}); err != nil {
+	if err := client.SendTextMessage(ctx, SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"}); err != nil {
 		t.Fatalf("SendTextMessage() error = %v", err)
 	}
 }
@@ -443,7 +515,7 @@ func TestHTTPClientSendTextMessageReturnsHTTPErrorBody(t *testing.T) {
 	defer server.Close()
 
 	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -460,7 +532,7 @@ func TestHTTPClientSendTextMessageReturnsAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -477,7 +549,7 @@ func TestHTTPClientSendTextMessageReturnsBodyOnNonJSONError(t *testing.T) {
 	defer server.Close()
 
 	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -498,7 +570,7 @@ func TestHTTPClientSendTextMessageReturnsEnvelopeDetailsOnNon200JSONError(t *tes
 	defer server.Close()
 
 	client := &HTTPClient{baseURL: server.URL, authToken: "token", client: server.Client(), logger: logging.New("debug")}
-	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello"})
+	err := client.SendTextMessage(context.Background(), SendMessageOptions{ToUserID: "user-1", Text: "hello", ContextToken: "ctx-1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
