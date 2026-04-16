@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type initStubDriver struct {
@@ -25,11 +26,19 @@ func (d countingDriver) Init(context.Context, Spec) (SessionRuntime, error) {
 }
 
 type runtimeStub struct {
-	run func(context.Context, Request) (Response, error)
+	run   func(context.Context, Request) (Response, error)
+	close func() error
 }
 
 func (r runtimeStub) Run(ctx context.Context, req Request) (Response, error) {
 	return r.run(ctx, req)
+}
+
+func (r runtimeStub) Close() error {
+	if r.close != nil {
+		return r.close()
+	}
+	return nil
 }
 
 func TestLookupDriverReturnsRegisteredFactory(t *testing.T) {
@@ -284,6 +293,255 @@ func TestSessionSendSerializesConcurrentCalls(t *testing.T) {
 	}
 	if got := session.State(); got != SessionStateReady {
 		t.Fatalf("State() after sends = %q", got)
+	}
+}
+
+func TestSessionCloseClosesRuntimeAndStopsSession(t *testing.T) {
+	closeCalls := 0
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return runtimeStub{
+			run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: req.Prompt}, nil
+			},
+			close: func() error {
+				closeCalls++
+				return nil
+			},
+		}, nil
+	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("closeCalls = %d", closeCalls)
+	}
+	if got := session.State(); got != SessionStateStopped {
+		t.Fatalf("State() after Close = %q", got)
+	}
+	if session.runtime != nil {
+		t.Fatal("expected runtime cleared after successful Close")
+	}
+}
+
+func TestSessionCloseReturnsRuntimeCloseFailure(t *testing.T) {
+	wantErr := errors.New("close boom")
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return runtimeStub{
+			run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: req.Prompt}, nil
+			},
+			close: func() error {
+				return wantErr
+			},
+		}, nil
+	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	err = session.Close()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := session.State(); got != SessionStateReady {
+		t.Fatalf("State() after failed Close = %q", got)
+	}
+	if session.runtime == nil {
+		t.Fatal("expected runtime retained after failed Close")
+	}
+}
+
+func TestSessionCloseDoesNotHoldLockDuringRuntimeClose(t *testing.T) {
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return runtimeStub{
+			run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: req.Prompt}, nil
+			},
+			close: func() error {
+				close(closeStarted)
+				<-releaseClose
+				return nil
+			},
+		}, nil
+	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- session.Close()
+	}()
+
+	<-closeStarted
+	locked := make(chan struct{})
+	go func() {
+		session.mu.Lock()
+		session.mu.Unlock()
+		close(locked)
+	}()
+
+	select {
+	case <-locked:
+	case <-time.After(time.Second):
+		t.Fatal("session mutex remained locked during runtime close")
+	}
+
+	close(releaseClose)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestManagerClosesReplacedSession(t *testing.T) {
+	driverName := "test-manager-close-replaced-session-" + t.Name()
+	var closeCalls int32
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			return runtimeStub{
+				run: func(_ context.Context, req Request) (Response, error) {
+					return Response{Text: spec.Command + ":" + req.Prompt}, nil
+				},
+				close: func() error {
+					atomic.AddInt32(&closeCalls, 1)
+					return nil
+				},
+			}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "alpha"}, Request{Prompt: "one"}); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "two"}); err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+	if got := atomic.LoadInt32(&closeCalls); got != 1 {
+		t.Fatalf("closeCalls = %d", got)
+	}
+}
+
+func TestManagerClosesOldSessionOutsideLock(t *testing.T) {
+	driverName := "test-manager-close-old-session-outside-lock-" + t.Name()
+	oldCloseStarted := make(chan struct{})
+	releaseOldClose := make(chan struct{})
+	oldCloseDone := make(chan struct{})
+	var initCalls int32
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			call := atomic.AddInt32(&initCalls, 1)
+			stub := runtimeStub{
+				run: func(_ context.Context, req Request) (Response, error) {
+					return Response{Text: spec.Command + ":" + req.Prompt}, nil
+				},
+			}
+			if call == 1 {
+				stub.close = func() error {
+					close(oldCloseStarted)
+					<-releaseOldClose
+					close(oldCloseDone)
+					return nil
+				}
+			}
+			return stub, nil
+		}}
+	})
+
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "alpha"}, Request{Prompt: "one"}); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "two"})
+		errCh <- err
+	}()
+
+	<-oldCloseStarted
+	locked := make(chan struct{})
+	go func() {
+		mgr.mu.Lock()
+		mgr.mu.Unlock()
+		close(locked)
+	}()
+
+	select {
+	case <-locked:
+	case <-time.After(time.Second):
+		t.Fatal("manager mutex remained locked during old session close")
+	}
+
+	close(releaseOldClose)
+	<-oldCloseDone
+	if err := <-errCh; err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+}
+
+func TestManagerReturnsOldSessionCloseFailureAfterSwap(t *testing.T) {
+	driverName := "test-manager-old-session-close-failure-" + t.Name()
+	wantErr := errors.New("old session close boom")
+	var initCalls int32
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			call := atomic.AddInt32(&initCalls, 1)
+			return runtimeStub{
+				run: func(_ context.Context, req Request) (Response, error) {
+					return Response{Text: spec.Command + ":" + req.Prompt}, nil
+				},
+				close: func() error {
+					if call == 1 {
+						return wantErr
+					}
+					return nil
+				},
+			}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "alpha"}, Request{Prompt: "one"}); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+
+	resp, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "two"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("second Send() error = %v", err)
+	}
+	if resp != (Response{}) {
+		t.Fatalf("resp = %#v", resp)
+	}
+	if got := mgr.State("bot-1"); got != SessionStateReady {
+		t.Fatalf("State() after old session close failure = %q", got)
+	}
+	if mgr.sessions["bot-1"] == nil || !mgr.sessions["bot-1"].Matches(Spec{Type: driverName, Command: "alpha"}) {
+		t.Fatal("expected stale session restored after close failure")
+	}
+
+	finalResp, finalErr := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "three"})
+	if !errors.Is(finalErr, wantErr) {
+		t.Fatalf("final Send() error = %v", finalErr)
+	}
+	if finalResp != (Response{}) {
+		t.Fatalf("final resp = %#v", finalResp)
+	}
+	mgr.sessions["bot-1"].state = SessionStateBroken
+	mgr.sessions["bot-1"].runtime = nil
+	mgr.sessions["bot-1"].spec = Spec{}
+	finalResp, finalErr = mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "three"})
+	if finalErr != nil {
+		t.Fatalf("retry Send() error = %v", finalErr)
+	}
+	if finalResp.Text != "beta:three" {
+		t.Fatalf("retry resp.Text = %q", finalResp.Text)
 	}
 }
 

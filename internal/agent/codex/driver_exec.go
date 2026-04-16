@@ -29,6 +29,10 @@ type ExecRuntime struct {
 	spec agent.Spec
 }
 
+func (r *ExecRuntime) Close() error {
+	return nil
+}
+
 type execStreamEvent struct {
 	Type string          `json:"type"`
 	Item *execStreamItem `json:"item,omitempty"`

@@ -137,6 +137,10 @@ func (r *PTYRuntime) close() error {
 	return firstErr
 }
 
+func (r *PTYRuntime) Close() error {
+	return r.close()
+}
+
 func isAlreadyClosed(err error) bool {
 	return strings.Contains(err.Error(), "file already closed")
 }
