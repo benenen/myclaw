@@ -322,6 +322,9 @@ func TestSessionCloseClosesRuntimeAndStopsSession(t *testing.T) {
 	if got := session.State(); got != SessionStateStopped {
 		t.Fatalf("State() after Close = %q", got)
 	}
+	if session.runtime != nil {
+		t.Fatal("expected runtime cleared after successful Close")
+	}
 }
 
 func TestSessionCloseReturnsRuntimeCloseFailure(t *testing.T) {
@@ -519,13 +522,26 @@ func TestManagerReturnsOldSessionCloseFailureAfterSwap(t *testing.T) {
 	if got := mgr.State("bot-1"); got != SessionStateReady {
 		t.Fatalf("State() after old session close failure = %q", got)
 	}
+	if mgr.sessions["bot-1"] == nil || !mgr.sessions["bot-1"].Matches(Spec{Type: driverName, Command: "alpha"}) {
+		t.Fatal("expected stale session restored after close failure")
+	}
 
 	finalResp, finalErr := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "three"})
-	if finalErr != nil {
+	if !errors.Is(finalErr, wantErr) {
 		t.Fatalf("final Send() error = %v", finalErr)
 	}
+	if finalResp != (Response{}) {
+		t.Fatalf("final resp = %#v", finalResp)
+	}
+	mgr.sessions["bot-1"].state = SessionStateBroken
+	mgr.sessions["bot-1"].runtime = nil
+	mgr.sessions["bot-1"].spec = Spec{}
+	finalResp, finalErr = mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "three"})
+	if finalErr != nil {
+		t.Fatalf("retry Send() error = %v", finalErr)
+	}
 	if finalResp.Text != "beta:three" {
-		t.Fatalf("final resp.Text = %q", finalResp.Text)
+		t.Fatalf("retry resp.Text = %q", finalResp.Text)
 	}
 }
 

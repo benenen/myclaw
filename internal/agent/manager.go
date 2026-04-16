@@ -71,6 +71,12 @@ func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Ses
 
 	if stale != nil {
 		if err := stale.Close(); err != nil {
+			m.mu.Lock()
+			if current, exists := m.sessions[botID]; exists && current == replacement {
+				m.sessions[botID] = stale
+			}
+			m.mu.Unlock()
+			_ = replacement.Close()
 			return nil, err
 		}
 	}

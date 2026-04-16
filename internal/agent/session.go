@@ -71,8 +71,8 @@ func (s *Session) Close() error {
 	defer s.mu.Unlock()
 	if s.runtime != nil {
 		s.runtime = nil
+		s.state = SessionStateStopped
 	}
-	s.state = SessionStateStopped
 	return nil
 }
 
