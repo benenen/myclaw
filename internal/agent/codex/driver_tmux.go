@@ -3,13 +3,13 @@ package codex
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/benenen/myclaw/internal/agent"
+	"github.com/gabefiori/gotmux"
 )
 
 type TMUXDriver struct {
@@ -41,13 +41,13 @@ type tmuxRuntimeFactory interface {
 	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error)
 }
 
-type tmuxExecFactory struct{}
+type tmuxGotmuxFactory struct{}
 
-type tmuxExecSession struct {
-	name string
+type tmuxGotmuxSession struct {
+	session *gotmux.Session
 }
 
-type tmuxExecPane struct {
+type tmuxGotmuxPane struct {
 	target string
 }
 
@@ -58,7 +58,7 @@ func init() {
 }
 
 func NewTMUXDriver() *TMUXDriver {
-	return &TMUXDriver{factory: tmuxExecFactory{}}
+	return &TMUXDriver{factory: tmuxGotmuxFactory{}}
 }
 
 func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRuntime, error) {
@@ -74,7 +74,7 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 	if d != nil {
 		runtimeFactory := d.factory
 		if runtimeFactory == nil {
-			runtimeFactory = tmuxExecFactory{}
+			runtimeFactory = tmuxGotmuxFactory{}
 		}
 		session, pane, err := runtimeFactory.Start(ctx, spec, nextTMUXSessionName())
 		if err != nil {
@@ -273,71 +273,75 @@ func normalizeTMUXOutput(text string) string {
 	return strings.ReplaceAll(text, "\r\n", "\n")
 }
 
-func (tmuxExecFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
-	args := append([]string{"new-session", "-d", "-s", sessionName}, spec.Args...)
-	args = append(args, spec.Command)
-	cmd := exec.CommandContext(ctx, "tmux", args...)
+func (tmuxGotmuxFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	if len(spec.Args) > 0 {
+		return nil, nil, fmt.Errorf("codex tmux driver does not support tmux startup args yet")
+	}
+	if len(spec.Env) > 0 {
+		return nil, nil, fmt.Errorf("codex tmux driver does not support tmux startup env yet")
+	}
+
+	config := &gotmux.SessionConfig{Name: sessionName, WindowName: "codex"}
 	if strings.TrimSpace(spec.WorkDir) != "" {
-		cmd.Dir = spec.WorkDir
+		config.Dir = spec.WorkDir
 	}
-	if env := flattenEnv(spec.Env); len(env) > 0 {
-		cmd.Env = append(cmd.Environ(), env...)
-	}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return nil, nil, fmt.Errorf("start tmux session %q: %s", sessionName, message)
-	}
-	return tmuxExecSession{name: sessionName}, tmuxExecPane{target: sessionName + ":0.0"}, nil
-}
-
-func (s tmuxExecSession) Kill() error {
-	cmd := exec.Command("tmux", "kill-session", "-t", s.name)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("kill tmux session %q: %s", s.name, message)
-	}
-	return nil
-}
-
-func (p tmuxExecPane) SendKeys(keys ...string) error {
-	args := append([]string{"send-keys", "-t", p.target}, keys...)
-	cmd := exec.Command("tmux", args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("send tmux keys to %q: %s", p.target, message)
-	}
-	return nil
-}
-
-func (p tmuxExecPane) CapturePane() (string, error) {
-	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", p.target)
-	output, err := cmd.CombinedOutput()
+	session, err := gotmux.NewSession(config)
 	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return "", fmt.Errorf("capture tmux pane %q: %s", p.target, message)
+		return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
 	}
-	return string(output), nil
+
+	pane := tmuxGotmuxPane{target: sessionName + ":0.0"}
+	if err := pane.SendKeys(spec.Command, "C-m"); err != nil {
+		_ = session.Kill()
+		return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
+	}
+	return tmuxGotmuxSession{session: session}, pane, nil
 }
 
-var tmuxRunCounter atomic.Uint64
+func (s tmuxGotmuxSession) Kill() error {
+	if s.session == nil {
+		return nil
+	}
+	if err := s.session.Kill(); err != nil {
+		return fmt.Errorf("kill tmux session %q: %w", s.session.Name, err)
+	}
+	return nil
+}
+
+func (p tmuxGotmuxPane) SendKeys(keys ...string) error {
+	args := append([]string{"send-keys", "-t", p.target}, keys...)
+	cmd, err := gotmux.NewTmuxCmd(args...)
+	if err != nil {
+		return err
+	}
+	if err := cmd.Exec(); err != nil {
+		return fmt.Errorf("send tmux keys to %q: %w", p.target, err)
+	}
+	return nil
+}
+
+func (p tmuxGotmuxPane) CapturePane() (string, error) {
+	cmd, err := gotmux.NewTmuxCmd("capture-pane", "-p", "-t", p.target)
+	if err != nil {
+		return "", err
+	}
+	output, err := cmd.ExecWithOutput()
+	if err != nil {
+		return "", fmt.Errorf("capture tmux pane %q: %w", p.target, err)
+	}
+	return output, nil
+}
+
 var tmuxSessionCounter atomic.Uint64
-
-func nextTMUXRunID() string {
-	return fmt.Sprintf("%d", tmuxRunCounter.Add(1))
-}
+var tmuxRunCounter atomic.Uint64
 
 func nextTMUXSessionName() string {
 	return fmt.Sprintf("myclaw-codex-%d", tmuxSessionCounter.Add(1))
+}
+
+func nextTMUXRunID() string {
+	return fmt.Sprintf("%d", tmuxRunCounter.Add(1))
 }

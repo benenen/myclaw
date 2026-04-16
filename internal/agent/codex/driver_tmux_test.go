@@ -48,8 +48,15 @@ func TestTMUXRuntimeRunSuccessfulSingleRequest(t *testing.T) {
 	if resp.Text != "assistant response: say hello" {
 		t.Fatalf("Run() text = %q", resp.Text)
 	}
-	if len(runtime.pane.(*fakePane).sendCalls) != 1 {
-		t.Fatalf("SendKeys() calls = %d, want 1", len(runtime.pane.(*fakePane).sendCalls))
+	pane := runtime.pane.(*fakePane)
+	if len(pane.sendCalls) != 1 {
+		t.Fatalf("SendKeys() calls = %d, want 1", len(pane.sendCalls))
+	}
+	want := []string{"__MYCLAW_CODEX_RUN_BEGIN_1__", "C-m", "say hello", "C-m", "__MYCLAW_CODEX_RUN_END_1__", "C-m"}
+	for i, got := range pane.sendCalls[0] {
+		if got != want[i] {
+			t.Fatalf("SendKeys() arg[%d] = %q, want %q", i, got, want[i])
+		}
 	}
 }
 
