@@ -55,13 +55,22 @@ func (s *Session) Matches(spec Spec) bool {
 
 func (s *Session) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.runtime == nil {
+	runtime := s.runtime
+	if runtime == nil {
 		s.state = SessionStateStopped
+		s.mu.Unlock()
 		return nil
 	}
-	if err := s.runtime.Close(); err != nil {
+	s.mu.Unlock()
+
+	if err := runtime.Close(); err != nil {
 		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runtime != nil {
+		s.runtime = nil
 	}
 	s.state = SessionStateStopped
 	return nil

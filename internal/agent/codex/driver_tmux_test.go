@@ -144,6 +144,79 @@ func TestTMUXRuntimeCloseKillsSession(t *testing.T) {
 	}
 }
 
+func TestTMUXRuntimeCloseReturnsKillFailureAndClearsState(t *testing.T) {
+	wantErr := errors.New("kill boom")
+	session := &fakeSession{killErr: wantErr}
+	runtime := &TMUXRuntime{
+		state:   stateReady,
+		prompt:  "codex>",
+		pane:    &fakePane{},
+		session: session,
+	}
+
+	err := runtime.Close()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if session.killCalls != 1 {
+		t.Fatalf("Kill() calls = %d", session.killCalls)
+	}
+	if runtime.session != nil {
+		t.Fatal("expected session cleared")
+	}
+	if runtime.pane != nil {
+		t.Fatal("expected pane cleared")
+	}
+	if runtime.state != stateBroken {
+		t.Fatalf("state = %q", runtime.state)
+	}
+	if got := runtime.currentError(); got == nil || got.Error() != "codex tmux runtime is closed" {
+		t.Fatalf("currentError() = %v", got)
+	}
+}
+
+func TestTMUXRuntimeCloseDoesNotHoldLockDuringKill(t *testing.T) {
+	killStarted := make(chan struct{})
+	releaseKill := make(chan struct{})
+	session := &fakeSession{
+		kill: func() error {
+			close(killStarted)
+			<-releaseKill
+			return nil
+		},
+	}
+	runtime := &TMUXRuntime{
+		state:   stateReady,
+		prompt:  "codex>",
+		pane:    &fakePane{},
+		session: session,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runtime.Close()
+	}()
+
+	<-killStarted
+	locked := make(chan struct{})
+	go func() {
+		runtime.mu.Lock()
+		runtime.mu.Unlock()
+		close(locked)
+	}()
+
+	select {
+	case <-locked:
+	case <-time.After(time.Second):
+		t.Fatal("runtime mutex remained locked during session kill")
+	}
+
+	close(releaseKill)
+	if err := <-errCh; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
 func TestExtractTMUXRunResultRequiresRestoredPrompt(t *testing.T) {
 	_, err := extractTMUXRunResult("__MYCLAW_CODEX_RUN_BEGIN_1__\nhello\n__MYCLAW_CODEX_RUN_END_1__\n", "__MYCLAW_CODEX_RUN_BEGIN_1__", "__MYCLAW_CODEX_RUN_END_1__", "codex>")
 	if err == nil || !strings.Contains(err.Error(), "prompt not restored") {
@@ -163,6 +236,7 @@ type fakePane struct {
 type fakeSession struct {
 	killCalls int
 	killErr   error
+	kill      func() error
 }
 
 func (p *fakePane) SendKeys(keys ...string) error {
@@ -193,5 +267,8 @@ func (p *fakePane) CapturePane() (string, error) {
 
 func (s *fakeSession) Kill() error {
 	s.killCalls++
+	if s.kill != nil {
+		return s.kill()
+	}
 	return s.killErr
 }

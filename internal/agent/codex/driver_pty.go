@@ -109,7 +109,7 @@ func (d *PTYDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	return runtime, nil
 }
 
-func (r *PTYRuntime) Close() error {
+func (r *PTYRuntime) close() error {
 	if r == nil {
 		return nil
 	}
@@ -135,6 +135,10 @@ func (r *PTYRuntime) Close() error {
 		}
 	})
 	return firstErr
+}
+
+func (r *PTYRuntime) Close() error {
+	return r.close()
 }
 
 func isAlreadyClosed(err error) bool {
