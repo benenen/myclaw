@@ -12,6 +12,7 @@ type Driver interface {
 
 type SessionRuntime interface {
 	Run(ctx context.Context, req Request) (Response, error)
+	Close() error
 }
 
 type DriverFactory func() Driver

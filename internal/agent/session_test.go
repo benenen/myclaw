@@ -25,11 +25,19 @@ func (d countingDriver) Init(context.Context, Spec) (SessionRuntime, error) {
 }
 
 type runtimeStub struct {
-	run func(context.Context, Request) (Response, error)
+	run   func(context.Context, Request) (Response, error)
+	close func() error
 }
 
 func (r runtimeStub) Run(ctx context.Context, req Request) (Response, error) {
 	return r.run(ctx, req)
+}
+
+func (r runtimeStub) Close() error {
+	if r.close != nil {
+		return r.close()
+	}
+	return nil
 }
 
 func TestLookupDriverReturnsRegisteredFactory(t *testing.T) {
@@ -284,6 +292,63 @@ func TestSessionSendSerializesConcurrentCalls(t *testing.T) {
 	}
 	if got := session.State(); got != SessionStateReady {
 		t.Fatalf("State() after sends = %q", got)
+	}
+}
+
+func TestSessionCloseClosesRuntimeAndStopsSession(t *testing.T) {
+	closeCalls := 0
+	session, err := NewSession(context.Background(), initStubDriver{init: func(_ context.Context, _ Spec) (SessionRuntime, error) {
+		return runtimeStub{
+			run: func(_ context.Context, req Request) (Response, error) {
+				return Response{Text: req.Prompt}, nil
+			},
+			close: func() error {
+				closeCalls++
+				return nil
+			},
+		}, nil
+	}}, Spec{Command: "codex"})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("closeCalls = %d", closeCalls)
+	}
+	if got := session.State(); got != SessionStateStopped {
+		t.Fatalf("State() after Close = %q", got)
+	}
+}
+
+func TestManagerClosesReplacedSession(t *testing.T) {
+	driverName := "test-manager-close-replaced-session-" + t.Name()
+	var closeCalls int32
+	registerTestDriver(t, driverName, func() Driver {
+		return initStubDriver{init: func(_ context.Context, spec Spec) (SessionRuntime, error) {
+			return runtimeStub{
+				run: func(_ context.Context, req Request) (Response, error) {
+					return Response{Text: spec.Command + ":" + req.Prompt}, nil
+				},
+				close: func() error {
+					atomic.AddInt32(&closeCalls, 1)
+					return nil
+				},
+			}, nil
+		}}
+	})
+
+	mgr := NewManager()
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "alpha"}, Request{Prompt: "one"}); err != nil {
+		t.Fatalf("first Send() error = %v", err)
+	}
+	if _, err := mgr.Send(context.Background(), "bot-1", Spec{Type: driverName, Command: "beta"}, Request{Prompt: "two"}); err != nil {
+		t.Fatalf("second Send() error = %v", err)
+	}
+	if got := atomic.LoadInt32(&closeCalls); got != 1 {
+		t.Fatalf("closeCalls = %d", got)
 	}
 }
 

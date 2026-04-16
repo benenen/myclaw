@@ -57,9 +57,17 @@ func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Ses
 	defer m.mu.Unlock()
 	session, ok = m.sessions[botID]
 	if ok && session.Matches(spec) && session.State() != SessionStateBroken {
+		if err := replacement.Close(); err != nil {
+			return nil, err
+		}
 		return session, nil
 	}
 	m.sessions[botID] = replacement
+	if ok {
+		if err := session.Close(); err != nil {
+			return nil, err
+		}
+	}
 	return replacement, nil
 }
 

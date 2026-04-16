@@ -218,6 +218,27 @@ func (r *TMUXRuntime) waitRunCompletion(ctx context.Context, beginMarker, endMar
 	}
 }
 
+func (r *TMUXRuntime) Close() error {
+	if r == nil {
+		return nil
+	}
+
+	r.mu.Lock()
+	session := r.session
+	r.session = nil
+	r.pane = nil
+	r.state = stateBroken
+	if r.readErr == nil {
+		r.readErr = fmt.Errorf("codex tmux runtime is closed")
+	}
+	r.mu.Unlock()
+
+	if session == nil {
+		return nil
+	}
+	return session.Kill()
+}
+
 func (r *TMUXRuntime) markBroken(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

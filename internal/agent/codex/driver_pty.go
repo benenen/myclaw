@@ -109,7 +109,7 @@ func (d *PTYDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	return runtime, nil
 }
 
-func (r *PTYRuntime) close() error {
+func (r *PTYRuntime) Close() error {
 	if r == nil {
 		return nil
 	}

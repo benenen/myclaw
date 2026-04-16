@@ -53,6 +53,20 @@ func (s *Session) Matches(spec Spec) bool {
 	return reflect.DeepEqual(s.spec, spec)
 }
 
+func (s *Session) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runtime == nil {
+		s.state = SessionStateStopped
+		return nil
+	}
+	if err := s.runtime.Close(); err != nil {
+		return err
+	}
+	s.state = SessionStateStopped
+	return nil
+}
+
 func cloneSpec(spec Spec) Spec {
 	cloned := spec
 	if spec.Args != nil {
