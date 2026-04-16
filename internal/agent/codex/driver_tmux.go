@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,7 +41,15 @@ type tmuxRuntimeFactory interface {
 	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error)
 }
 
-type tmuxUnavailableFactory struct{}
+type tmuxExecFactory struct{}
+
+type tmuxExecSession struct {
+	name string
+}
+
+type tmuxExecPane struct {
+	target string
+}
 
 func init() {
 	agent.MustRegisterDriver("codex-tmux", func() agent.Driver {
@@ -49,7 +58,7 @@ func init() {
 }
 
 func NewTMUXDriver() *TMUXDriver {
-	return &TMUXDriver{factory: tmuxUnavailableFactory{}}
+	return &TMUXDriver{factory: tmuxExecFactory{}}
 }
 
 func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRuntime, error) {
@@ -65,7 +74,7 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 	if d != nil {
 		runtimeFactory := d.factory
 		if runtimeFactory == nil {
-			runtimeFactory = tmuxUnavailableFactory{}
+			runtimeFactory = tmuxExecFactory{}
 		}
 		session, pane, err := runtimeFactory.Start(ctx, spec, nextTMUXSessionName())
 		if err != nil {
@@ -170,7 +179,7 @@ func (r *TMUXRuntime) waitUntilReady(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("codex tmux capture failed: %w", err)
 		}
-		if strings.Contains(normalizeOutput(captured), prompt) {
+		if strings.Contains(normalizeTMUXOutput(captured), prompt) {
 			r.mu.Lock()
 			if r.state != stateBroken {
 				r.state = stateReady
@@ -229,7 +238,7 @@ func (r *TMUXRuntime) currentError() error {
 }
 
 func extractTMUXRunResult(text, beginMarker, endMarker, prompt string) (string, error) {
-	normalized := normalizeOutput(text)
+	normalized := normalizeTMUXOutput(text)
 	begin := strings.LastIndex(normalized, beginMarker)
 	if begin < 0 {
 		return "", fmt.Errorf("codex tmux output missing begin marker")
@@ -260,12 +269,66 @@ func cleanupTMUXRunText(text string) string {
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
-func normalizeOutput(text string) string {
+func normalizeTMUXOutput(text string) string {
 	return strings.ReplaceAll(text, "\r\n", "\n")
 }
 
-func (tmuxUnavailableFactory) Start(context.Context, agent.Spec, string) (tmuxSession, tmuxPane, error) {
-	return nil, nil, fmt.Errorf("codex tmux runtime factory is not configured")
+func (tmuxExecFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
+	args := append([]string{"new-session", "-d", "-s", sessionName}, spec.Args...)
+	args = append(args, spec.Command)
+	cmd := exec.CommandContext(ctx, "tmux", args...)
+	if strings.TrimSpace(spec.WorkDir) != "" {
+		cmd.Dir = spec.WorkDir
+	}
+	if env := flattenEnv(spec.Env); len(env) > 0 {
+		cmd.Env = append(cmd.Environ(), env...)
+	}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return nil, nil, fmt.Errorf("start tmux session %q: %s", sessionName, message)
+	}
+	return tmuxExecSession{name: sessionName}, tmuxExecPane{target: sessionName + ":0.0"}, nil
+}
+
+func (s tmuxExecSession) Kill() error {
+	cmd := exec.Command("tmux", "kill-session", "-t", s.name)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("kill tmux session %q: %s", s.name, message)
+	}
+	return nil
+}
+
+func (p tmuxExecPane) SendKeys(keys ...string) error {
+	args := append([]string{"send-keys", "-t", p.target}, keys...)
+	cmd := exec.Command("tmux", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("send tmux keys to %q: %s", p.target, message)
+	}
+	return nil
+}
+
+func (p tmuxExecPane) CapturePane() (string, error) {
+	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", p.target)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return "", fmt.Errorf("capture tmux pane %q: %s", p.target, message)
+	}
+	return string(output), nil
 }
 
 var tmuxRunCounter atomic.Uint64
