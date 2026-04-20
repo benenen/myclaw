@@ -110,8 +110,6 @@ func (d *PTYDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	}
 	go runtime.readLoop()
 
-	time.Sleep(50 * time.Second)
-
 	return runtime, nil
 }
 

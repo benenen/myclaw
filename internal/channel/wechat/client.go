@@ -93,6 +93,8 @@ type messageItem struct {
 	TextItem *textItem `json:"text_item"`
 }
 
+var defaultSendMessageTimeout = 30 * time.Second
+
 type textItem struct {
 	Text string `json:"text"`
 }
@@ -745,7 +747,7 @@ func (c *HTTPClient) SendTextMessage(ctx context.Context, opts SendMessageOption
 	if err != nil {
 		return fmt.Errorf("marshal sendmsg request: %w", err)
 	}
-	requestCtx, cancel := contextWithDefaultTimeout(ctx, 30*time.Second)
+	requestCtx, cancel := contextWithDefaultTimeout(ctx, defaultSendMessageTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+"/ilink/bot/sendmessage", bytes.NewReader(payload))

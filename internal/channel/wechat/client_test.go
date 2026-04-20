@@ -14,6 +14,16 @@ import (
 	"github.com/benenen/myclaw/internal/logging"
 )
 
+func withSendMessageDefaultTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+
+	original := defaultSendMessageTimeout
+	defaultSendMessageTimeout = timeout
+	t.Cleanup(func() {
+		defaultSendMessageTimeout = original
+	})
+}
+
 func TestHTTPClientCreateBindingSession(t *testing.T) {
 	var gotPath string
 	var gotBotType string
@@ -341,6 +351,8 @@ func TestHTTPClientSendTextMessageIncludesContextToken(t *testing.T) {
 }
 
 func TestHTTPClientSendTextMessageSetsDefaultTimeoutWithoutDeadline(t *testing.T) {
+	withSendMessageDefaultTimeout(t, 100*time.Millisecond)
+
 	client := &HTTPClient{
 		baseURL:   "http://127.0.0.1:1",
 		authToken: "token",
@@ -350,7 +362,7 @@ func TestHTTPClientSendTextMessageSetsDefaultTimeoutWithoutDeadline(t *testing.T
 				return nil, fmt.Errorf("missing deadline")
 			}
 			remaining := time.Until(deadline)
-			if remaining <= 0 || remaining > 30*time.Second {
+			if remaining <= 0 || remaining > defaultSendMessageTimeout {
 				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
 			}
 			return &http.Response{
@@ -367,6 +379,8 @@ func TestHTTPClientSendTextMessageSetsDefaultTimeoutWithoutDeadline(t *testing.T
 }
 
 func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutExpires(t *testing.T) {
+	withSendMessageDefaultTimeout(t, 100*time.Millisecond)
+
 	client := &HTTPClient{
 		baseURL:   "http://127.0.0.1:1",
 		authToken: "token",
@@ -376,7 +390,7 @@ func TestHTTPClientSendTextMessageReturnsTransportErrorWhenDefaultTimeoutExpires
 				return nil, fmt.Errorf("missing deadline")
 			}
 			remaining := time.Until(deadline)
-			if remaining <= 0 || remaining > 30*time.Second {
+			if remaining <= 0 || remaining > defaultSendMessageTimeout {
 				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
 			}
 			<-req.Context().Done()
@@ -452,6 +466,8 @@ func TestContextWithDefaultTimeoutCancelsDerivedContext(t *testing.T) {
 }
 
 func TestHTTPClientSendTextMessageUsesDefaultTimeoutWhenTransportWaitsForCancellation(t *testing.T) {
+	withSendMessageDefaultTimeout(t, 100*time.Millisecond)
+
 	client := &HTTPClient{
 		baseURL:   "http://127.0.0.1:1",
 		authToken: "token",
@@ -461,7 +477,7 @@ func TestHTTPClientSendTextMessageUsesDefaultTimeoutWhenTransportWaitsForCancell
 				return nil, fmt.Errorf("missing deadline")
 			}
 			remaining := time.Until(deadline)
-			if remaining <= 0 || remaining > 30*time.Second {
+			if remaining <= 0 || remaining > defaultSendMessageTimeout {
 				return nil, fmt.Errorf("unexpected deadline remaining: %s", remaining)
 			}
 			<-req.Context().Done()
