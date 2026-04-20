@@ -24,7 +24,10 @@ AI CLI channel plugin — centralized channel management service.
 export CHANNEL_MASTER_KEY=$(openssl rand -base64 32)
 
 # Start the server
-go run ./cmd/server
+go run .
+
+# Or explicitly run the server command
+go run . server
 ```
 
 ## Run Tests
