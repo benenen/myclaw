@@ -93,10 +93,10 @@ func NewTMUXDriver() *TMUXDriver {
 
 func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRuntime, error) {
 	if strings.TrimSpace(spec.Command) == "" {
-		return nil, fmt.Errorf("codex tmux driver requires command")
+		return nil, fmt.Errorf("claude tmux driver requires command")
 	}
 	if strings.TrimSpace(spec.WorkDir) == "" {
-		return nil, fmt.Errorf("codex tmux driver requires workdir")
+		return nil, fmt.Errorf("claude tmux driver requires workdir")
 	}
 
 	runtime := &TMUXRuntime{
