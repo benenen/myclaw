@@ -41,3 +41,28 @@ func (s GotmuxSession) Kill() error {
 	return nil
 }
 
+// SendKeys sends one or more key sequences to the tmux pane.
+func (p GotmuxPane) SendKeys(keys ...string) error {
+	if p.pane == nil {
+		return fmt.Errorf("tmux pane is nil")
+	}
+	for _, key := range keys {
+		if err := p.pane.SendKeys(key); err != nil {
+			return fmt.Errorf("send tmux keys: %w", err)
+		}
+	}
+	return nil
+}
+
+// CapturePane captures the current content of the tmux pane.
+func (p GotmuxPane) CapturePane() (string, error) {
+	if p.pane == nil {
+		return "", fmt.Errorf("tmux pane is nil")
+	}
+	output, err := p.pane.Capture()
+	if err != nil {
+		return "", fmt.Errorf("capture tmux pane: %w", err)
+	}
+	return output, nil
+}
+
