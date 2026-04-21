@@ -90,3 +90,17 @@ type tmuxGotmuxSession struct {
 type tmuxGotmuxPane struct {
 	pane *gotmux.Pane
 }
+
+// NewTMUXDriver creates a new TMUXDriver with default factories.
+func NewTMUXDriver() *TMUXDriver {
+	return &TMUXDriver{
+		factory:         tmuxGotmuxFactory{},
+		runStoreFactory: sqliteTMUXRunStoreFactory{},
+	}
+}
+
+func init() {
+	agent.MustRegisterDriver("claude-tmux", func() agent.Driver {
+		return NewTMUXDriver()
+	})
+}
