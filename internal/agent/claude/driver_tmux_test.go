@@ -2,7 +2,10 @@ package claude
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/benenen/myclaw/internal/agent"
 )
@@ -180,5 +183,86 @@ func TestTMUXDriver_Init_MissingWorkDir(t *testing.T) {
 	_, err := driver.Init(ctx, spec)
 	if err == nil {
 		t.Fatal("Init() should have failed with empty WorkDir")
+	}
+}
+
+// TestTMUXRuntime_Run_Success tests successful run with mocks.
+func TestTMUXRuntime_Run_Success(t *testing.T) {
+	pane := &mockTMUXPane{
+		capturePaneFunc: func() (string, error) {
+			return "test output\n", nil
+		},
+	}
+
+	runStore := &mockTMUXRunStore{
+		getByRunIDFunc: func(ctx context.Context, runID string) (tmuxRunRecord, error) {
+			return tmuxRunRecord{RunID: runID, Status: "done"}, nil
+		},
+	}
+
+	runtime := &TMUXRuntime{
+		state:    stateReady,
+		pane:     pane,
+		session:  &mockTMUXSession{},
+		waitGap:  1 * time.Millisecond,
+		spec: agent.Spec{
+			BotName: "test-bot",
+			WorkDir: t.TempDir(),
+		},
+		runStore: runStore,
+	}
+
+	req := agent.Request{
+		Prompt: "test prompt",
+	}
+
+	ctx := context.Background()
+	resp, err := runtime.Run(ctx, req)
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if resp.RuntimeType != runtimeTypeClaude {
+		t.Errorf("expected runtime type %q, got %q", runtimeTypeClaude, resp.RuntimeType)
+	}
+	if resp.Text == "" {
+		t.Error("expected non-empty response text")
+	}
+}
+
+// TestTMUXRuntime_Run_EmptyPrompt tests error when prompt is empty.
+func TestTMUXRuntime_Run_EmptyPrompt(t *testing.T) {
+	runtime := &TMUXRuntime{
+		state: stateReady,
+	}
+
+	req := agent.Request{
+		Prompt: "",
+	}
+
+	ctx := context.Background()
+	_, err := runtime.Run(ctx, req)
+	if err == nil {
+		t.Fatal("Run should fail with empty prompt")
+	}
+	if !strings.Contains(err.Error(), "prompt is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestTMUXRuntime_Run_BrokenState tests error when runtime is broken.
+func TestTMUXRuntime_Run_BrokenState(t *testing.T) {
+	runtime := &TMUXRuntime{
+		state:   stateBroken,
+		readErr: errors.New("test error"),
+	}
+
+	req := agent.Request{
+		Prompt: "test",
+	}
+
+	ctx := context.Background()
+	_, err := runtime.Run(ctx, req)
+	if err == nil {
+		t.Fatal("Run should fail with broken state")
 	}
 }
