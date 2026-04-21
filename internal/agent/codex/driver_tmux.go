@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,7 +41,7 @@ type TMUXRuntime struct {
 }
 
 type tmuxRuntimeFactory interface {
-	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmux.Session, tmux.Pane, error)
+	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmux.Session, tmux.Pane, bool, error)
 }
 
 type tmuxRunRecord struct {
@@ -59,6 +60,9 @@ type tmuxRunStoreFactory interface {
 }
 
 type sqliteTMUXRunStoreFactory struct{}
+
+var currentExecutablePath = os.Executable
+var tmuxInitLogf = log.Printf
 
 func init() {
 	agent.MustRegisterDriver("codex-tmux", func() agent.Driver {
@@ -91,7 +95,10 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 		if runtimeFactory == nil {
 			runtimeFactory = tmux.GotmuxFactory{}
 		}
-		session, pane, err := runtimeFactory.Start(ctx, spec, nextTMUXSessionName(spec.BotName))
+		startupSpec := spec
+		startupSpec.Command = buildTMUXShellCommand(spec)
+		sessionName := nextTMUXSessionName(spec.BotName)
+		session, pane, created, err := runtimeFactory.Start(ctx, startupSpec, sessionName)
 		if err != nil {
 			return nil, err
 		}
@@ -107,12 +114,23 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 			return nil, err
 		}
 		runtime.runStore = runStore
+
+		if !created {
+			runtime.mu.Lock()
+			runtime.state = stateReady
+			runtime.mu.Unlock()
+			tmuxInitLogf("codex tmux waitUntilReady skipped: bot=%s session=%s created=%t", spec.BotName, sessionName, created)
+			return runtime, nil
+		}
 	}
 
-	if err := runtime.waitUntilReady(ctx); err != nil {
+	err := runtime.waitUntilReady(ctx)
+	if err != nil {
+		tmuxInitLogf("codex tmux waitUntilReady failed: bot=%s session=%s err=%v", spec.BotName, nextTMUXSessionName(spec.BotName), err)
 		runtime.markBroken(err)
 		return nil, err
 	}
+	tmuxInitLogf("codex tmux waitUntilReady ok: bot=%s session=%s", spec.BotName, nextTMUXSessionName(spec.BotName))
 	return runtime, nil
 }
 
@@ -216,7 +234,7 @@ func (r *TMUXRuntime) waitUntilReady(ctx context.Context) error {
 			return fmt.Errorf("codex tmux capture failed: %w", err)
 		}
 		normalized := tmux.NormalizeTMUXOutput(captured)
-		if normalized != "" {
+		if codexTMUXReady(normalized) {
 			r.mu.Lock()
 			if r.state != stateBroken {
 				r.state = stateReady
@@ -229,6 +247,14 @@ func (r *TMUXRuntime) waitUntilReady(ctx context.Context) error {
 		}
 		time.Sleep(gap)
 	}
+}
+
+func codexTMUXReady(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "OpenAI Codex")
 }
 
 func (r *TMUXRuntime) waitRunCompletion(ctx context.Context, runID string) error {
@@ -361,8 +387,20 @@ func buildTMUXShellCommand(spec agent.Spec) string {
 	if command == "" {
 		return ""
 	}
-	notifyConfig := fmt.Sprintf(`notify=["myclaw", "notify", "codex", %s]`, strconv.Quote(spec.BotName))
-	return command + " -c " + tmux.ShellQuote(notifyConfig)
+	notifyCommand := "myclaw"
+	if executable, err := currentExecutablePath(); err == nil && strings.TrimSpace(executable) != "" {
+		notifyCommand = executable
+	}
+	notifyConfig := fmt.Sprintf(`notify=[%s, "notify", "codex", %s]`, strconv.Quote(notifyCommand), strconv.Quote(spec.BotName))
+	parts := []string{
+		command,
+		"-c " + tmux.ShellQuote(notifyConfig),
+	}
+	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
+		trustConfig := fmt.Sprintf(`projects.%s.trust_level="trusted"`, strconv.Quote(workDir))
+		parts = append(parts, "-c "+tmux.ShellQuote(trustConfig))
+	}
+	return strings.Join(parts, " ")
 }
 
 func nextTMUXSessionName(botName string) string {

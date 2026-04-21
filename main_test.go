@@ -102,8 +102,9 @@ func TestRunNotifyMarksRunDone(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
+	var stderr bytes.Buffer
 
-	exitCode := runWithServer([]string{"notify", "codex", "helper-bot"}, &stdout, io.Discard, func(io.Writer) int {
+	exitCode := runWithServer([]string{"notify", "codex", "helper-bot"}, &stdout, &stderr, func(io.Writer) int {
 		t.Fatal("server should not run for notify")
 		return 1
 	})
@@ -113,6 +114,12 @@ func TestRunNotifyMarksRunDone(t *testing.T) {
 	}
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty output", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "notify start: runtime=codex bot=helper-bot run_id=run_1") {
+		t.Fatalf("stderr = %q, want notify start log", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "notify done: runtime=codex bot=helper-bot run_id=run_1") {
+		t.Fatalf("stderr = %q, want notify done log", stderr.String())
 	}
 
 	db, err := store.Open(sqlitePath)

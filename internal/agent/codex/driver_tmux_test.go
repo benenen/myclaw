@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/benenen/myclaw/internal/agent"
 	"github.com/benenen/myclaw/internal/tmux"
 )
+
+const readyTMUXCapture = "OpenAI Codex\nmodel: gpt-5.4 high\ndirectory: ~/workspace/master/myclaw\nPress enter to continue\n"
 
 func TestTMUXDriverUsesForkedGotmuxModule(t *testing.T) {
 	_ = gotmux.SessionOptions{}
@@ -37,10 +40,55 @@ func TestTMUXDriverInitRejectsEmptyCommand(t *testing.T) {
 }
 
 func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
-	factory := &captureSessionNameFactory{session: &fakeSession{}, pane: &fakePane{captures: []string{"codex>\n"}}}
+	factory := &captureSessionNameFactory{session: &fakeSession{}, pane: &fakePane{captures: []string{readyTMUXCapture}}, created: true}
 	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(string, ...any) {}
+	defer func() { tmuxInitLogf = originalLogf }()
 
-	_, err := driver.Init(context.Background(), agent.Spec{
+	workDir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := driver.Init(ctx, agent.Spec{
+		Type:       "codex-tmux",
+		Command:    "/usr/local/bin/codex",
+		BotName:    "helper-bot",
+		WorkDir:    workDir,
+		SQLitePath: "/tmp/myclaw/myclaw.db",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if factory.sessionName != "myclaw-codex-helper-bot" {
+		t.Fatalf("session name = %q", factory.sessionName)
+	}
+	wantCommand := `/usr/local/bin/codex -c 'notify=["/abs/path/myclaw", "notify", "codex", "helper-bot"]' -c ` +
+		tmux.ShellQuote(`projects."`+workDir+`".trust_level="trusted"`)
+	if factory.command != wantCommand {
+		t.Fatalf("command = %q, want %q", factory.command, wantCommand)
+	}
+}
+
+func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
+	factory := &captureSessionNameFactory{session: &fakeSession{}, pane: &fakePane{captures: []string{readyTMUXCapture}}, created: true}
+	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := driver.Init(ctx, agent.Spec{
 		Type:       "codex-tmux",
 		Command:    "/usr/local/bin/codex",
 		BotName:    "helper-bot",
@@ -50,12 +98,98 @@ func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	if factory.sessionName != "myclaw-codex-helper-bot" {
-		t.Fatalf("session name = %q", factory.sessionName)
+	if len(logs) != 1 || !strings.Contains(logs[0], "codex tmux waitUntilReady ok: bot=helper-bot session=myclaw-codex-helper-bot") {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
+	factory := &captureSessionNameFactory{
+		session: &fakeSession{},
+		pane: &fakePane{
+			captureErrAt: 0,
+			captureErr:   errors.New("capture boom"),
+		},
+		created: true,
+	}
+	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := driver.Init(ctx, agent.Spec{
+		Type:       "codex-tmux",
+		Command:    "/usr/local/bin/codex",
+		BotName:    "helper-bot",
+		WorkDir:    t.TempDir(),
+		SQLitePath: "/tmp/myclaw/myclaw.db",
+	})
+	if err == nil {
+		t.Fatal("expected Init() error")
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "codex tmux waitUntilReady failed: bot=helper-bot session=myclaw-codex-helper-bot err=codex tmux capture failed: capture boom") {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
+	factory := &captureSessionNameFactory{
+		session: &fakeSession{},
+		pane: &fakePane{
+			captureErrAt: 0,
+			captureErr:   errors.New("should not capture"),
+		},
+		created: false,
+	}
+	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	runtime, err := driver.Init(ctx, agent.Spec{
+		Type:       "codex-tmux",
+		Command:    "/usr/local/bin/codex",
+		BotName:    "helper-bot",
+		WorkDir:    t.TempDir(),
+		SQLitePath: "/tmp/myclaw/myclaw.db",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if runtime == nil {
+		t.Fatal("expected runtime")
+	}
+	if factory.pane.(*fakePane).captureCalls != 0 {
+		t.Fatalf("captureCalls = %d, want 0", factory.pane.(*fakePane).captureCalls)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "codex tmux waitUntilReady skipped: bot=helper-bot session=myclaw-codex-helper-bot created=false") {
+		t.Fatalf("logs = %#v", logs)
 	}
 }
 
 func TestBuildTMUXSessionOptionsUsesWorkspaceAndNotifyCommand(t *testing.T) {
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
 	options := buildTMUXSessionOptions(agent.Spec{
 		Command: "/usr/local/bin/codex",
 		BotName: "helper-bot",
@@ -68,7 +202,7 @@ func TestBuildTMUXSessionOptionsUsesWorkspaceAndNotifyCommand(t *testing.T) {
 	if options.StartDirectory != "/tmp/myclaw/bots/bot_1/workspace" {
 		t.Fatalf("StartDirectory = %q", options.StartDirectory)
 	}
-	want := `/usr/local/bin/codex -c 'notify=["myclaw", "notify", "codex", "helper-bot"]'`
+	want := `/usr/local/bin/codex -c 'notify=["/abs/path/myclaw", "notify", "codex", "helper-bot"]' -c 'projects."/tmp/myclaw/bots/bot_1/workspace".trust_level="trusted"'`
 	if options.ShellCommand != want {
 		t.Fatalf("ShellCommand = %q, want %q", options.ShellCommand, want)
 	}
@@ -163,6 +297,27 @@ func TestTMUXRuntimeRunMarksBrokenOnCaptureFailure(t *testing.T) {
 	}
 	if runtime.state != stateBroken {
 		t.Fatalf("state = %q", runtime.state)
+	}
+}
+
+func TestTMUXRuntimeWaitUntilReadyWaitsForCodexInterface(t *testing.T) {
+	runtime := &TMUXRuntime{
+		state:   stateStarting,
+		waitGap: time.Nanosecond,
+		pane: &fakePane{captures: []string{
+			"booting...\n",
+			readyTMUXCapture,
+		}},
+	}
+
+	if err := runtime.waitUntilReady(context.Background()); err != nil {
+		t.Fatalf("waitUntilReady() error = %v", err)
+	}
+	if runtime.state != stateReady {
+		t.Fatalf("state = %q, want %q", runtime.state, stateReady)
+	}
+	if runtime.pane.(*fakePane).captureCalls < 2 {
+		t.Fatalf("captureCalls = %d, want at least 2", runtime.pane.(*fakePane).captureCalls)
 	}
 }
 
@@ -316,7 +471,9 @@ type captureSessionNameFactory struct {
 	session     tmux.Session
 	pane        tmux.Pane
 	err         error
+	created     bool
 	sessionName string
+	command     string
 }
 
 type fakeSession struct {
@@ -338,9 +495,10 @@ type fakeRunStore struct {
 	createErr   error
 }
 
-func (f *captureSessionNameFactory) Start(_ context.Context, _ agent.Spec, sessionName string) (tmux.Session, tmux.Pane, error) {
+func (f *captureSessionNameFactory) Start(_ context.Context, spec agent.Spec, sessionName string) (tmux.Session, tmux.Pane, bool, error) {
 	f.sessionName = sessionName
-	return f.session, f.pane, f.err
+	f.command = spec.Command
+	return f.session, f.pane, f.created, f.err
 }
 
 func (f *fakeRunStoreFactory) Open(_ agent.Spec) (tmuxRunStore, error) {

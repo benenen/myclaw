@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,10 +23,12 @@ func NewNotifyCommand() *cobra.Command {
 		Short: "Mark the current agent run as done",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			logger := log.New(cmd.ErrOrStderr(), "", log.LstdFlags)
 			runID, err := readCurrentRunID()
 			if err != nil {
 				return err
 			}
+			logger.Printf("notify start: runtime=%s bot=%s run_id=%s", args[0], args[1], runID)
 			paths, err := config.LoadDataPaths()
 			if err != nil {
 				return err
@@ -53,6 +56,7 @@ func NewNotifyCommand() *cobra.Command {
 			if err := repo.UpsertDone(context.Background(), runID, args[1], args[0]); err != nil {
 				return err
 			}
+			logger.Printf("notify done: runtime=%s bot=%s run_id=%s", args[0], args[1], runID)
 			return nil
 		},
 	}

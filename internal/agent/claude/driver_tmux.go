@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -57,7 +58,7 @@ type tmuxPane = tmux.Pane
 type tmuxSession = tmux.Session
 
 type tmuxRuntimeFactory interface {
-	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error)
+	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error)
 }
 
 type tmuxRunRecord struct {
@@ -76,6 +77,9 @@ type tmuxRunStoreFactory interface {
 }
 
 type sqliteTMUXRunStoreFactory struct{}
+
+var currentExecutablePath = os.Executable
+var tmuxInitLogf = log.Printf
 
 // NewTMUXDriver creates a new TMUXDriver with default factories.
 func NewTMUXDriver() *TMUXDriver {
@@ -108,7 +112,9 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 
 	if d != nil {
 		sessionName := nextTMUXSessionName(spec.BotName)
-		session, pane, err := d.factory.Start(ctx, spec, sessionName)
+		startupSpec := spec
+		startupSpec.Command = buildTMUXShellCommand(spec)
+		session, pane, created, err := d.factory.Start(ctx, startupSpec, sessionName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to start tmux session: %w", err)
 		}
@@ -121,12 +127,23 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 			return runtime, nil
 		}
 		runtime.runStore = runStore
+
+		if !created {
+			runtime.mu.Lock()
+			runtime.state = stateReady
+			runtime.mu.Unlock()
+			tmuxInitLogf("claude tmux waitUntilReady skipped: bot=%s session=%s created=%t", spec.BotName, sessionName, created)
+			return runtime, nil
+		}
 	}
 
-	if err := runtime.waitUntilReady(ctx); err != nil {
+	err := runtime.waitUntilReady(ctx)
+	if err != nil {
+		tmuxInitLogf("claude tmux waitUntilReady failed: bot=%s session=%s err=%v", spec.BotName, nextTMUXSessionName(spec.BotName), err)
 		runtime.markBroken(err)
 		return runtime, nil
 	}
+	tmuxInitLogf("claude tmux waitUntilReady ok: bot=%s session=%s", spec.BotName, nextTMUXSessionName(spec.BotName))
 
 	return runtime, nil
 }
@@ -328,8 +345,20 @@ func buildTMUXShellCommand(spec agent.Spec) string {
 	if command == "" {
 		return ""
 	}
-	notifyConfig := fmt.Sprintf(`notify=["myclaw", "notify", "claude", %s]`, strconv.Quote(spec.BotName))
-	return command + " -c " + tmux.ShellQuote(notifyConfig)
+	notifyCommand := "myclaw"
+	if executable, err := currentExecutablePath(); err == nil && strings.TrimSpace(executable) != "" {
+		notifyCommand = executable
+	}
+	notifyConfig := fmt.Sprintf(`notify=[%s, "notify", "claude", %s]`, strconv.Quote(notifyCommand), strconv.Quote(spec.BotName))
+	parts := []string{
+		command,
+		"-c " + tmux.ShellQuote(notifyConfig),
+	}
+	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
+		trustConfig := fmt.Sprintf(`projects.%s.trust_level="trusted"`, strconv.Quote(workDir))
+		parts = append(parts, "-c "+tmux.ShellQuote(trustConfig))
+	}
+	return strings.Join(parts, " ")
 }
 
 // buildTMUXSessionOptions creates SessionOptions with name, shell command, and start directory.

@@ -84,4 +84,7 @@ func TestBootstrapUsesRegisteredDriverTypeForBotCLI(t *testing.T) {
 	if _, ok := agent.LookupDriver("codex-tmux"); !ok {
 		t.Fatal("expected codex-tmux driver registration for bootstrap wiring")
 	}
+	if _, ok := agent.LookupDriver("codex-acp"); !ok {
+		t.Fatal("expected codex-acp driver registration for bootstrap wiring")
+	}
 }

@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -45,14 +46,14 @@ func (m *mockTMUXSession) Kill() error {
 
 // mockTMUXRuntimeFactory is a mock implementation of tmuxRuntimeFactory.
 type mockTMUXRuntimeFactory struct {
-	startFunc func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error)
+	startFunc func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error)
 }
 
-func (m *mockTMUXRuntimeFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
+func (m *mockTMUXRuntimeFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error) {
 	if m.startFunc != nil {
 		return m.startFunc(ctx, spec, sessionName)
 	}
-	return &mockTMUXSession{}, &mockTMUXPane{}, nil
+	return &mockTMUXSession{}, &mockTMUXPane{}, true, nil
 }
 
 // mockTMUXRunStore is a mock implementation of tmuxRunStore.
@@ -98,6 +99,12 @@ func (m *mockTMUXRunStoreFactory) Open(spec agent.Spec) (tmuxRunStore, error) {
 // TestTMUXDriver_Init_Success tests successful initialization with valid spec.
 func TestTMUXDriver_Init_Success(t *testing.T) {
 	ctx := context.Background()
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(string, ...any) {}
+	defer func() { tmuxInitLogf = originalLogf }()
 	spec := agent.Spec{
 		Command: "claude",
 		WorkDir: "/tmp/test",
@@ -110,8 +117,8 @@ func TestTMUXDriver_Init_Success(t *testing.T) {
 	}
 	mockSession := &mockTMUXSession{}
 	mockFactory := &mockTMUXRuntimeFactory{
-		startFunc: func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
-			return mockSession, mockPane, nil
+		startFunc: func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error) {
+			return mockSession, mockPane, true, nil
 		},
 	}
 	mockStoreFactory := &mockTMUXRunStoreFactory{}
@@ -140,6 +147,138 @@ func TestTMUXDriver_Init_Success(t *testing.T) {
 	}
 	if tmuxRuntime.spec.WorkDir != spec.WorkDir {
 		t.Errorf("expected WorkDir %q, got %q", spec.WorkDir, tmuxRuntime.spec.WorkDir)
+	}
+}
+
+func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
+	ctx := context.Background()
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	driver := &TMUXDriver{
+		factory: &mockTMUXRuntimeFactory{
+			startFunc: func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error) {
+				return &mockTMUXSession{}, &mockTMUXPane{
+					capturePaneFunc: func() (string, error) {
+						return "ready", nil
+					},
+				}, true, nil
+			},
+		},
+		runStoreFactory: &mockTMUXRunStoreFactory{},
+	}
+
+	_, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "claude tmux waitUntilReady ok: bot=helper-bot session=myclaw-claude-helper-bot") {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
+	ctx := context.Background()
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	driver := &TMUXDriver{
+		factory: &mockTMUXRuntimeFactory{
+			startFunc: func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error) {
+				return &mockTMUXSession{}, &mockTMUXPane{
+					capturePaneFunc: func() (string, error) {
+						return "", errors.New("capture boom")
+					},
+				}, true, nil
+			},
+		},
+		runStoreFactory: &mockTMUXRunStoreFactory{},
+	}
+
+	runtime, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if runtime == nil {
+		t.Fatal("expected runtime")
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "claude tmux waitUntilReady failed: bot=helper-bot session=myclaw-claude-helper-bot err=failed to capture pane: capture boom") {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
+	ctx := context.Background()
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	captureCalls := 0
+	var logs []string
+	originalLogf := tmuxInitLogf
+	tmuxInitLogf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+	defer func() { tmuxInitLogf = originalLogf }()
+
+	driver := &TMUXDriver{
+		factory: &mockTMUXRuntimeFactory{
+			startFunc: func(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, bool, error) {
+				return &mockTMUXSession{}, &mockTMUXPane{
+					capturePaneFunc: func() (string, error) {
+						captureCalls++
+						return "", errors.New("should not capture")
+					},
+				}, false, nil
+			},
+		},
+		runStoreFactory: &mockTMUXRunStoreFactory{},
+	}
+
+	runtime, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	if runtime == nil {
+		t.Fatal("expected runtime")
+	}
+	if captureCalls != 0 {
+		t.Fatalf("captureCalls = %d, want 0", captureCalls)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "claude tmux waitUntilReady skipped: bot=helper-bot session=myclaw-claude-helper-bot created=false") {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestBuildTMUXShellCommandUsesAbsoluteNotifyPath(t *testing.T) {
+	originalExecutable := currentExecutablePath
+	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
+	defer func() { currentExecutablePath = originalExecutable }()
+
+	got := buildTMUXShellCommand(agent.Spec{
+		Command: "claude",
+		BotName: "helper-bot",
+		WorkDir: "/tmp/workspace",
+	})
+	want := `claude -c 'notify=["/abs/path/myclaw", "notify", "claude", "helper-bot"]' -c 'projects."/tmp/workspace".trust_level="trusted"'`
+	if got != want {
+		t.Fatalf("buildTMUXShellCommand() = %q, want %q", got, want)
 	}
 }
 
