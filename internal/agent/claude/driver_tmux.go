@@ -75,17 +75,7 @@ type tmuxRunStoreFactory interface {
 	Open(spec agent.Spec) (tmuxRunStore, error)
 }
 
-type tmuxGotmuxFactory struct{}
-
 type sqliteTMUXRunStoreFactory struct{}
-
-type tmuxGotmuxSession struct {
-	session *gotmux.Session
-}
-
-type tmuxGotmuxPane struct {
-	pane *gotmux.Pane
-}
 
 // NewTMUXDriver creates a new TMUXDriver with default factories.
 func NewTMUXDriver() *TMUXDriver {
@@ -379,93 +369,6 @@ func buildTMUXSessionOptions(spec agent.Spec, sessionName string) *gotmux.Sessio
 		options.StartDirectory = spec.WorkDir
 	}
 	return options
-}
-
-// Start creates a new tmux session or reuses an existing one.
-func (tmuxGotmuxFactory) Start(ctx context.Context, spec agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
-	if ctx.Err() != nil {
-		return nil, nil, ctx.Err()
-	}
-	if len(spec.Args) > 0 {
-		return nil, nil, fmt.Errorf("claude tmux driver does not support tmux startup args yet")
-	}
-	if len(spec.Env) > 0 {
-		return nil, nil, fmt.Errorf("claude tmux driver does not support tmux startup env yet")
-	}
-
-	tmux, err := gotmux.DefaultTmux()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var session *gotmux.Session
-	if tmux.HasSession(sessionName) {
-		if existing, err := tmux.GetSessionByName(sessionName); err == nil && existing != nil {
-			session = existing
-		}
-	} else {
-		options := buildTMUXSessionOptions(spec, sessionName)
-		session, err = tmux.NewSession(options)
-		if err != nil {
-			return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
-		}
-	}
-
-	if session == nil {
-		return nil, nil, fmt.Errorf("failed to create or find tmux session %q", sessionName)
-	}
-
-	window, err := session.GetWindowByIndex(0)
-	if err != nil {
-		_ = session.Kill()
-		return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
-	}
-	panes, err := window.ListPanes()
-	if err != nil || len(panes) == 0 {
-		_ = session.Kill()
-		if err == nil {
-			err = fmt.Errorf("tmux session %q has no panes", sessionName)
-		}
-		return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
-	}
-	pane := tmuxGotmuxPane{pane: panes[0]}
-	return tmuxGotmuxSession{session: session}, pane, nil
-}
-
-// Kill terminates the tmux session.
-func (s tmuxGotmuxSession) Kill() error {
-	if s.session == nil {
-		return nil
-	}
-	if err := s.session.Kill(); err != nil {
-		return fmt.Errorf("kill tmux session %q: %w", s.session.Name, err)
-	}
-	return nil
-}
-
-// SendKeys sends keys to the tmux pane.
-func (p tmuxGotmuxPane) SendKeys(keys ...string) error {
-	if p.pane == nil {
-		return fmt.Errorf("tmux pane is nil")
-	}
-	for _, key := range keys {
-		if err := p.pane.SendKeys(key); err != nil {
-			return fmt.Errorf("send tmux keys: %w", err)
-		}
-	}
-	return nil
-}
-
-// CapturePane captures the current pane output.
-func (p tmuxGotmuxPane) CapturePane() (string, error) {
-	if p.pane == nil {
-		return "", fmt.Errorf("tmux pane is nil")
-	}
-	output, err := p.pane.Capture()
-	if err != nil {
-		return "", fmt.Errorf("capture tmux pane: %w", err)
-	}
-	return output, nil
 }
 
 // sqliteTMUXRunStore implements tmuxRunStore using SQLite.
