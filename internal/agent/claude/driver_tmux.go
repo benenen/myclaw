@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	_ "os"
-	_ "path/filepath"
-	_ "strconv"
-	_ "strings"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/benenen/myclaw/internal/agent"
-	_ "github.com/benenen/myclaw/internal/domain"
-	_ "github.com/benenen/myclaw/internal/store"
-	_ "github.com/benenen/myclaw/internal/store/repositories"
+	"github.com/benenen/myclaw/internal/domain"
+	"github.com/benenen/myclaw/internal/store"
+	"github.com/benenen/myclaw/internal/store/repositories"
 )
 
 const currentTMUXRunIDFileName = ".myclaw-run-id"
@@ -209,4 +209,84 @@ func (r *TMUXRuntime) waitRunCompletion(ctx context.Context, runID string) error
 
 		time.Sleep(r.waitGap)
 	}
+}
+
+// Run executes a prompt in the TMUX runtime and returns the response.
+func (r *TMUXRuntime) Run(ctx context.Context, req agent.Request) (agent.Response, error) {
+	r.runMu.Lock()
+	defer r.runMu.Unlock()
+
+	promptText := strings.TrimSpace(req.Prompt)
+	if promptText == "" {
+		return agent.Response{}, fmt.Errorf("claude tmux request prompt is required")
+	}
+
+	r.mu.Lock()
+	if r.state == stateBroken {
+		err := r.readErr
+		if err == nil {
+			err = fmt.Errorf("claude tmux runtime is broken")
+		}
+		r.mu.Unlock()
+		return agent.Response{}, err
+	}
+	if r.state != stateReady && r.state != stateStarting {
+		state := r.state
+		r.mu.Unlock()
+		return agent.Response{}, fmt.Errorf("claude tmux runtime is not ready: %s", state)
+	}
+	pane := r.pane
+	r.state = stateRunning
+	r.mu.Unlock()
+
+	if pane == nil {
+		r.markBroken(fmt.Errorf("claude tmux runtime is not connected to a pane"))
+		return agent.Response{}, r.currentError()
+	}
+	if r.runStore == nil {
+		r.markBroken(fmt.Errorf("claude tmux runtime is not connected to run state store"))
+		return agent.Response{}, r.currentError()
+	}
+
+	runCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		runCtx, cancel = context.WithTimeout(ctx, defaultRunTimeout)
+	}
+	defer cancel()
+
+	runID := domain.NewPrefixedID("run")
+	if err := writeTMUXCurrentRunID(r.spec.WorkDir, runID); err != nil {
+		r.markBroken(err)
+		return agent.Response{}, err
+	}
+	if err := r.runStore.CreatePending(runCtx, runID, r.spec.BotName, runtimeTypeClaude); err != nil {
+		r.markBroken(fmt.Errorf("claude tmux create run failed: %w", err))
+		return agent.Response{}, r.currentError()
+	}
+
+	if err := pane.SendKeys(promptText, "C-m"); err != nil {
+		r.markBroken(fmt.Errorf("claude tmux send failed: %w", err))
+		return agent.Response{}, r.currentError()
+	}
+
+	if err := r.waitRunCompletion(runCtx, runID); err != nil {
+		r.markBroken(err)
+		return agent.Response{}, err
+	}
+
+	captured, err := pane.CapturePane()
+	if err != nil {
+		r.markBroken(fmt.Errorf("claude tmux capture failed: %w", err))
+		return agent.Response{}, r.currentError()
+	}
+	text := cleanupTMUXRunText(normalizeTMUXOutput(captured))
+
+	r.mu.Lock()
+	if r.state != stateBroken {
+		r.state = stateReady
+	}
+	r.mu.Unlock()
+
+	return agent.Response{Text: text, RuntimeType: runtimeTypeClaude, ExitCode: 0, RawOutput: text}, nil
 }
