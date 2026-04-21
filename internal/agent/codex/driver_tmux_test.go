@@ -11,6 +11,7 @@ import (
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/benenen/myclaw/internal/agent"
+	"github.com/benenen/myclaw/internal/tmux"
 )
 
 func TestTMUXDriverUsesForkedGotmuxModule(t *testing.T) {
@@ -312,8 +313,8 @@ type fakePane struct {
 }
 
 type captureSessionNameFactory struct {
-	session     tmuxSession
-	pane        tmuxPane
+	session     tmux.Session
+	pane        tmux.Pane
 	err         error
 	sessionName string
 }
@@ -337,7 +338,7 @@ type fakeRunStore struct {
 	createErr   error
 }
 
-func (f *captureSessionNameFactory) Start(_ context.Context, _ agent.Spec, sessionName string) (tmuxSession, tmuxPane, error) {
+func (f *captureSessionNameFactory) Start(_ context.Context, _ agent.Spec, sessionName string) (tmux.Session, tmux.Pane, error) {
 	f.sessionName = sessionName
 	return f.session, f.pane, f.err
 }

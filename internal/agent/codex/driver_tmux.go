@@ -184,7 +184,7 @@ func (r *TMUXRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 		r.markBroken(fmt.Errorf("codex tmux capture failed: %w", err))
 		return agent.Response{}, r.currentError()
 	}
-	text := cleanupTMUXRunText(normalizeTMUXOutput(captured))
+	text := tmux.CleanupTMUXRunText(tmux.NormalizeTMUXOutput(captured))
 
 	r.mu.Lock()
 	if r.state != stateBroken {
@@ -215,7 +215,7 @@ func (r *TMUXRuntime) waitUntilReady(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("codex tmux capture failed: %w", err)
 		}
-		normalized := normalizeTMUXOutput(captured)
+		normalized := tmux.NormalizeTMUXOutput(captured)
 		if normalized != "" {
 			r.mu.Lock()
 			if r.state != stateBroken {
@@ -295,23 +295,6 @@ func (r *TMUXRuntime) currentError() error {
 	return fmt.Errorf("codex tmux runtime is broken")
 }
 
-func cleanupTMUXRunText(text string) string {
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	cleaned := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		cleaned = append(cleaned, strings.TrimRight(line, "\r"))
-	}
-	return strings.TrimSpace(strings.Join(cleaned, "\n"))
-}
-
-func normalizeTMUXOutput(text string) string {
-	return strings.ReplaceAll(text, "\r\n", "\n")
-}
-
 func writeTMUXCurrentRunID(workDir, runID string) error {
 	if strings.TrimSpace(workDir) == "" {
 		return fmt.Errorf("codex tmux workdir is required")
@@ -379,14 +362,7 @@ func buildTMUXShellCommand(spec agent.Spec) string {
 		return ""
 	}
 	notifyConfig := fmt.Sprintf(`notify=["myclaw", "notify", "codex", %s]`, strconv.Quote(spec.BotName))
-	return command + " -c " + shellQuote(notifyConfig)
-}
-
-func shellQuote(text string) string {
-	if text == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+	return command + " -c " + tmux.ShellQuote(notifyConfig)
 }
 
 func nextTMUXSessionName(botName string) string {
