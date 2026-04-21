@@ -2,8 +2,8 @@ package claude
 
 import (
 	"context"
-	_ "errors"
-	_ "fmt"
+	"errors"
+	"fmt"
 	_ "os"
 	_ "path/filepath"
 	_ "strconv"
@@ -103,4 +103,44 @@ func init() {
 	agent.MustRegisterDriver("claude-tmux", func() agent.Driver {
 		return NewTMUXDriver()
 	})
+}
+
+// Init initializes a new TMUX runtime for the given spec.
+func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRuntime, error) {
+	if spec.Command == "" {
+		return nil, errors.New("claude tmux driver requires command")
+	}
+	if spec.WorkDir == "" {
+		return nil, errors.New("claude tmux driver requires workdir")
+	}
+
+	runtime := &TMUXRuntime{
+		state:   stateStarting,
+		waitGap: 10 * time.Millisecond,
+		spec:    spec,
+	}
+
+	if d != nil {
+		sessionName := nextTMUXSessionName(spec.BotName)
+		session, pane, err := d.factory.Start(ctx, spec, sessionName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start tmux session: %w", err)
+		}
+		runtime.session = session
+		runtime.pane = pane
+
+		runStore, err := d.runStoreFactory.Open(spec)
+		if err != nil {
+			runtime.markBroken(fmt.Errorf("failed to open run store: %w", err))
+			return runtime, nil
+		}
+		runtime.runStore = runStore
+	}
+
+	if err := runtime.waitUntilReady(ctx); err != nil {
+		runtime.markBroken(err)
+		return runtime, nil
+	}
+
+	return runtime, nil
 }
