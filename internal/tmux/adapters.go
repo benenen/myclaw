@@ -92,7 +92,13 @@ func (GotmuxFactory) Start(ctx context.Context, spec agent.Spec, sessionName str
 			session = existing
 		}
 	} else {
-		options := buildSessionOptions(spec, sessionName)
+		options := &gotmux.SessionOptions{
+			Name:         sessionName,
+			ShellCommand: spec.Command,
+		}
+		if strings.TrimSpace(spec.WorkDir) != "" {
+			options.StartDirectory = spec.WorkDir
+		}
 		session, err = tmux.NewSession(options)
 		if err != nil {
 			return nil, nil, fmt.Errorf("start tmux session %q: %w", sessionName, err)
@@ -122,18 +128,6 @@ func (GotmuxFactory) Start(ctx context.Context, spec agent.Spec, sessionName str
 	}
 	pane := GotmuxPane{pane: panes[0]}
 	return GotmuxSession{session: session}, pane, nil
-}
-
-// buildSessionOptions creates SessionOptions with name, shell command, and start directory.
-func buildSessionOptions(spec agent.Spec, sessionName string) *gotmux.SessionOptions {
-	options := &gotmux.SessionOptions{
-		Name:         sessionName,
-		ShellCommand: spec.Command,
-	}
-	if strings.TrimSpace(spec.WorkDir) != "" {
-		options.StartDirectory = spec.WorkDir
-	}
-	return options
 }
 
 // NormalizeTMUXOutput normalizes line endings in tmux output.
