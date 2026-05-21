@@ -246,6 +246,7 @@ function renderDetail() {
   document.getElementById('detail-channel').textContent = bot.channel_type;
   document.getElementById('detail-bot-id').textContent = bot.bot_id;
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
+  document.getElementById('detail-hook-url').textContent = hookUrl(bot.name);
   renderSelectedBotAgentControls();
   if (!activeBindingId) {
     document.getElementById('connect-result').innerHTML = '';
@@ -387,6 +388,19 @@ function escapeJs(value) {
   return String(value ?? '')
     .replaceAll('\\', '\\\\')
     .replaceAll("'", "\\'");
+}
+
+// ── Hook URL ──────────────────────────────────────────────
+
+function hookUrl(botName) {
+  return window.location.origin + '/hooks/' + encodeURIComponent(botName);
+}
+
+function copyHookUrl() {
+  const bot = selectedBot();
+  if (!bot) { toast('select a bot'); return; }
+  const url = hookUrl(bot.name);
+  navigator.clipboard.writeText(url).then(() => toast('hook url copied')).catch(() => toast('copy failed'));
 }
 
 // ── Bootstrap ───────────────────────────────────────────

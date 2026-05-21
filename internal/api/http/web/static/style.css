@@ -756,6 +756,26 @@ input:focus, select:focus {
   border-radius: 8px;
 }
 
+.hook-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hook-url-value {
+  flex: 1;
+  display: block;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  border: 1px solid var(--line-soft);
+  font: 400 12px/1.5 'JetBrains Mono', monospace;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #connect-result {
   margin-top: 10px;
 }

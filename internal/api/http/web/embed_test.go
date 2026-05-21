@@ -35,17 +35,17 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 			t.Fatal("missing app.js script")
 		}
 
-		for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect"} {
+		for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "Webhook"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("response missing %q", want)
 			}
 		}
-		for _, id := range []string{"create-bot-capability", "create-bot-mode", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text"} {
+		for _, id := range []string{"create-bot-capability", "create-bot-mode", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text", "detail-hook-url"} {
 			if !strings.Contains(body, id) {
 				t.Fatalf("response missing element id %q", id)
 			}
 		}
-		for _, handler := range []string{"copyShareURL()", "saveSelectedBotAgent()", "closeQRModal()", "openCreateBotModal()", "connectSelectedBot()", "closeCreateBotModal()"} {
+		for _, handler := range []string{"copyShareURL()", "saveSelectedBotAgent()", "closeQRModal()", "openCreateBotModal()", "connectSelectedBot()", "closeCreateBotModal()", "copyHookUrl()"} {
 			if !strings.Contains(body, handler) {
 				t.Fatalf("response missing onclick handler %q", handler)
 			}
@@ -97,6 +97,12 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 		}
 		if !strings.Contains(body, "async function api(") {
 			t.Fatal("app.js missing api helper")
+		}
+		if !strings.Contains(body, "function hookUrl(botName)") {
+			t.Fatal("app.js missing hookUrl function")
+		}
+		if !strings.Contains(body, "function copyHookUrl()") {
+			t.Fatal("app.js missing copyHookUrl function")
 		}
 	})
 
