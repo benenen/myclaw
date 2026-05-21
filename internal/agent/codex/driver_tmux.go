@@ -2,11 +2,8 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,54 +11,29 @@ import (
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 	"github.com/benenen/myclaw/internal/agent"
-	"github.com/benenen/myclaw/internal/domain"
-	"github.com/benenen/myclaw/internal/store"
-	"github.com/benenen/myclaw/internal/store/repositories"
 	"github.com/benenen/myclaw/internal/tmux"
 )
 
-const currentTMUXRunIDFileName = ".myclaw-run-id"
-
 type TMUXDriver struct {
-	factory         tmuxRuntimeFactory
-	runStoreFactory tmuxRunStoreFactory
+	factory tmuxRuntimeFactory
 }
 
 type TMUXRuntime struct {
 	mu    sync.Mutex
 	runMu sync.Mutex
 
-	state    runtimeState
-	pane     tmux.Pane
-	session  tmux.Session
-	readErr  error
-	waitGap  time.Duration
-	spec     agent.Spec
-	runStore tmuxRunStore
+	state   runtimeState
+	pane    tmux.Pane
+	session tmux.Session
+	readErr error
+	waitGap time.Duration
+	spec    agent.Spec
 }
 
 type tmuxRuntimeFactory interface {
 	Start(ctx context.Context, spec agent.Spec, sessionName string) (tmux.Session, tmux.Pane, bool, error)
 }
 
-type tmuxRunRecord struct {
-	RunID  string
-	Status string
-}
-
-type tmuxRunStore interface {
-	CreatePending(ctx context.Context, runID, botName, runtimeType string) error
-	UpsertDone(ctx context.Context, runID, botName, runtimeType string) error
-	GetByRunID(ctx context.Context, runID string) (tmuxRunRecord, error)
-}
-
-type tmuxRunStoreFactory interface {
-	Open(spec agent.Spec) (tmuxRunStore, error)
-}
-
-type sqliteTMUXRunStoreFactory struct{}
-
-var currentExecutablePath = os.Executable
 var tmuxInitLogf = log.Printf
 
 func init() {
@@ -72,8 +44,7 @@ func init() {
 
 func NewTMUXDriver() *TMUXDriver {
 	return &TMUXDriver{
-		factory:         tmux.GotmuxFactory{},
-		runStoreFactory: sqliteTMUXRunStoreFactory{},
+		factory: tmux.GotmuxFactory{},
 	}
 }
 
@@ -104,16 +75,6 @@ func (d *TMUXDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRu
 		}
 		runtime.session = session
 		runtime.pane = pane
-
-		runStoreFactory := d.runStoreFactory
-		if runStoreFactory == nil {
-			runStoreFactory = sqliteTMUXRunStoreFactory{}
-		}
-		runStore, err := runStoreFactory.Open(spec)
-		if err != nil {
-			return nil, err
-		}
-		runtime.runStore = runStore
 
 		if !created {
 			runtime.mu.Lock()
@@ -165,36 +126,10 @@ func (r *TMUXRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 		r.markBroken(fmt.Errorf("codex tmux runtime is not connected to a pane"))
 		return agent.Response{}, r.currentError()
 	}
-	if r.runStore == nil {
-		r.markBroken(fmt.Errorf("codex tmux runtime is not connected to run state store"))
-		return agent.Response{}, r.currentError()
-	}
-
-	runCtx := ctx
-	cancel := func() {}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		runCtx, cancel = context.WithTimeout(ctx, defaultRunTimeout)
-	}
-	defer cancel()
-
-	runID := domain.NewPrefixedID("run")
-	if err := writeTMUXCurrentRunID(r.spec.WorkDir, runID); err != nil {
-		r.markBroken(err)
-		return agent.Response{}, err
-	}
-	if err := r.runStore.CreatePending(runCtx, runID, r.spec.BotName, runtimeTypeCodex); err != nil {
-		r.markBroken(fmt.Errorf("codex tmux create run failed: %w", err))
-		return agent.Response{}, r.currentError()
-	}
 
 	if err := pane.SendKeys(promptText, "C-m"); err != nil {
 		r.markBroken(fmt.Errorf("codex tmux send failed: %w", err))
 		return agent.Response{}, r.currentError()
-	}
-
-	if err := r.waitRunCompletion(runCtx, runID); err != nil {
-		r.markBroken(err)
-		return agent.Response{}, err
 	}
 
 	captured, err := pane.CapturePane()
@@ -257,30 +192,6 @@ func codexTMUXReady(text string) bool {
 	return strings.Contains(normalized, "OpenAI Codex")
 }
 
-func (r *TMUXRuntime) waitRunCompletion(ctx context.Context, runID string) error {
-	r.mu.Lock()
-	gap := r.waitGap
-	runStore := r.runStore
-	r.mu.Unlock()
-	if gap <= 0 {
-		gap = 10 * time.Millisecond
-	}
-
-	for {
-		run, err := runStore.GetByRunID(ctx, runID)
-		if err == nil && run.Status == "done" {
-			return nil
-		}
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			return fmt.Errorf("codex tmux run state read failed: %w", err)
-		}
-		if ctx.Err() != nil {
-			return fmt.Errorf("codex tmux run timed out: %w", ctx.Err())
-		}
-		time.Sleep(gap)
-	}
-}
-
 func (r *TMUXRuntime) Close() error {
 	if r == nil {
 		return nil
@@ -321,56 +232,6 @@ func (r *TMUXRuntime) currentError() error {
 	return fmt.Errorf("codex tmux runtime is broken")
 }
 
-func writeTMUXCurrentRunID(workDir, runID string) error {
-	if strings.TrimSpace(workDir) == "" {
-		return fmt.Errorf("codex tmux workdir is required")
-	}
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		return fmt.Errorf("codex tmux prepare workdir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(workDir, currentTMUXRunIDFileName), []byte(runID+"\n"), 0o644); err != nil {
-		return fmt.Errorf("codex tmux write current run id: %w", err)
-	}
-	return nil
-}
-
-type sqliteTMUXRunStore struct {
-	repo *repositories.AgentRunRepository
-}
-
-func (sqliteTMUXRunStoreFactory) Open(spec agent.Spec) (tmuxRunStore, error) {
-	if strings.TrimSpace(spec.SQLitePath) == "" {
-		return nil, fmt.Errorf("codex tmux driver requires sqlite path")
-	}
-	db, err := store.Open(spec.SQLitePath)
-	if err != nil {
-		return nil, err
-	}
-	if err := store.Migrate(db); err != nil {
-		return nil, err
-	}
-	return &sqliteTMUXRunStore{repo: repositories.NewAgentRunRepository(db)}, nil
-}
-
-func (s *sqliteTMUXRunStore) CreatePending(ctx context.Context, runID, botName, runtimeType string) error {
-	return s.repo.CreatePending(ctx, runID, botName, runtimeType)
-}
-
-func (s *sqliteTMUXRunStore) UpsertDone(ctx context.Context, runID, botName, runtimeType string) error {
-	return s.repo.UpsertDone(ctx, runID, botName, runtimeType)
-}
-
-func (s *sqliteTMUXRunStore) GetByRunID(ctx context.Context, runID string) (tmuxRunRecord, error) {
-	run, err := s.repo.GetByRunID(ctx, runID)
-	if err != nil {
-		return tmuxRunRecord{}, err
-	}
-	return tmuxRunRecord{
-		RunID:  run.RunID,
-		Status: run.Status,
-	}, nil
-}
-
 func buildTMUXSessionOptions(spec agent.Spec, sessionName string) *gotmux.SessionOptions {
 	options := &gotmux.SessionOptions{
 		Name:         sessionName,
@@ -387,15 +248,7 @@ func buildTMUXShellCommand(spec agent.Spec) string {
 	if command == "" {
 		return ""
 	}
-	notifyCommand := "myclaw"
-	if executable, err := currentExecutablePath(); err == nil && strings.TrimSpace(executable) != "" {
-		notifyCommand = executable
-	}
-	notifyConfig := fmt.Sprintf(`notify=[%s, "notify", "codex", %s]`, strconv.Quote(notifyCommand), strconv.Quote(spec.BotName))
-	parts := []string{
-		command,
-		"-c " + tmux.ShellQuote(notifyConfig),
-	}
+	parts := []string{command}
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		trustConfig := fmt.Sprintf(`projects.%s.trust_level="trusted"`, strconv.Quote(workDir))
 		parts = append(parts, "-c "+tmux.ShellQuote(trustConfig))

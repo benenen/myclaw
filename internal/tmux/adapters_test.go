@@ -93,7 +93,7 @@ func TestValidateStartupSpecAcceptsExistingExecutableAndWorkDir(t *testing.T) {
 
 func TestWrapStartErrorIncludesCommandAndWorkDir(t *testing.T) {
 	spec := agent.Spec{
-		Command: "/root/.nvm/versions/node/v22.16.0/bin/codex -c 'notify=[\"myclaw\", \"notify\", \"codex\", \"test\"]'",
+		Command: `/root/.nvm/versions/node/v22.16.0/bin/codex -c 'projects."/root/.myclaw/bots/bot_1/workspace".trust_level="trusted"'`,
 		WorkDir: "/root/.myclaw/bots/bot_1/workspace",
 	}
 
@@ -104,7 +104,7 @@ func TestWrapStartErrorIncludesCommandAndWorkDir(t *testing.T) {
 	if !strings.Contains(err.Error(), `start tmux session "myclaw-codex-test": failed to list panes`) {
 		t.Fatalf("unexpected error = %v", err)
 	}
-	if !strings.Contains(err.Error(), `command="/root/.nvm/versions/node/v22.16.0/bin/codex -c 'notify=[\"myclaw\", \"notify\", \"codex\", \"test\"]'"`) {
+	if !strings.Contains(err.Error(), `command="/root/.nvm/versions/node/v22.16.0/bin/codex -c 'projects.\"/root/.myclaw/bots/bot_1/workspace\".trust_level=\"trusted\"'"`) {
 		t.Fatalf("unexpected error = %v", err)
 	}
 	if !strings.Contains(err.Error(), `workdir="/root/.myclaw/bots/bot_1/workspace"`) {

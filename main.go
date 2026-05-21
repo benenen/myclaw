@@ -62,7 +62,6 @@ func newRootCommand(stdout, stderr io.Writer, server func(io.Writer) int) (*cobr
 	})
 
 	root.AddCommand(cmd.NewServerCommandWithRunner(stderr, &exitCode, server))
-	root.AddCommand(cmd.NewNotifyCommand())
 
 	return root, &exitCode
 }
@@ -79,6 +78,5 @@ func isHelpArg(arg string) bool {
 func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  myclaw [server]")
-	fmt.Fprintln(w, "  myclaw notify <runtime> <botname>")
 	fmt.Fprintln(w, "  myclaw help")
 }

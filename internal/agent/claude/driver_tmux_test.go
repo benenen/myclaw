@@ -56,52 +56,9 @@ func (m *mockTMUXRuntimeFactory) Start(ctx context.Context, spec agent.Spec, ses
 	return &mockTMUXSession{}, &mockTMUXPane{}, true, nil
 }
 
-// mockTMUXRunStore is a mock implementation of tmuxRunStore.
-type mockTMUXRunStore struct {
-	createPendingFunc func(ctx context.Context, runID, botName, runtimeType string) error
-	upsertDoneFunc    func(ctx context.Context, runID, botName, runtimeType string) error
-	getByRunIDFunc    func(ctx context.Context, runID string) (tmuxRunRecord, error)
-}
-
-func (m *mockTMUXRunStore) CreatePending(ctx context.Context, runID, botName, runtimeType string) error {
-	if m.createPendingFunc != nil {
-		return m.createPendingFunc(ctx, runID, botName, runtimeType)
-	}
-	return nil
-}
-
-func (m *mockTMUXRunStore) UpsertDone(ctx context.Context, runID, botName, runtimeType string) error {
-	if m.upsertDoneFunc != nil {
-		return m.upsertDoneFunc(ctx, runID, botName, runtimeType)
-	}
-	return nil
-}
-
-func (m *mockTMUXRunStore) GetByRunID(ctx context.Context, runID string) (tmuxRunRecord, error) {
-	if m.getByRunIDFunc != nil {
-		return m.getByRunIDFunc(ctx, runID)
-	}
-	return tmuxRunRecord{}, nil
-}
-
-// mockTMUXRunStoreFactory is a mock implementation of tmuxRunStoreFactory.
-type mockTMUXRunStoreFactory struct {
-	openFunc func(spec agent.Spec) (tmuxRunStore, error)
-}
-
-func (m *mockTMUXRunStoreFactory) Open(spec agent.Spec) (tmuxRunStore, error) {
-	if m.openFunc != nil {
-		return m.openFunc(spec)
-	}
-	return &mockTMUXRunStore{}, nil
-}
-
 // TestTMUXDriver_Init_Success tests successful initialization with valid spec.
 func TestTMUXDriver_Init_Success(t *testing.T) {
 	ctx := context.Background()
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
 	originalLogf := tmuxInitLogf
 	tmuxInitLogf = func(string, ...any) {}
 	defer func() { tmuxInitLogf = originalLogf }()
@@ -121,12 +78,8 @@ func TestTMUXDriver_Init_Success(t *testing.T) {
 			return mockSession, mockPane, true, nil
 		},
 	}
-	mockStoreFactory := &mockTMUXRunStoreFactory{}
 
-	driver := &TMUXDriver{
-		factory:         mockFactory,
-		runStoreFactory: mockStoreFactory,
-	}
+	driver := &TMUXDriver{factory: mockFactory}
 
 	runtime, err := driver.Init(ctx, spec)
 	if err != nil {
@@ -152,9 +105,6 @@ func TestTMUXDriver_Init_Success(t *testing.T) {
 
 func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
 	ctx := context.Background()
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
 
 	var logs []string
 	originalLogf := tmuxInitLogf
@@ -173,7 +123,6 @@ func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
 				}, true, nil
 			},
 		},
-		runStoreFactory: &mockTMUXRunStoreFactory{},
 	}
 
 	_, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
@@ -187,9 +136,6 @@ func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
 
 func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
 	ctx := context.Background()
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
 
 	var logs []string
 	originalLogf := tmuxInitLogf
@@ -208,7 +154,6 @@ func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
 				}, true, nil
 			},
 		},
-		runStoreFactory: &mockTMUXRunStoreFactory{},
 	}
 
 	runtime, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
@@ -225,9 +170,6 @@ func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
 
 func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 	ctx := context.Background()
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
 
 	captureCalls := 0
 	var logs []string
@@ -248,7 +190,6 @@ func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 				}, false, nil
 			},
 		},
-		runStoreFactory: &mockTMUXRunStoreFactory{},
 	}
 
 	runtime, err := driver.Init(ctx, agent.Spec{Command: "claude", WorkDir: "/tmp/test", BotName: "helper-bot"})
@@ -266,17 +207,13 @@ func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 	}
 }
 
-func TestBuildTMUXShellCommandUsesAbsoluteNotifyPath(t *testing.T) {
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
-
+func TestBuildTMUXShellCommandIncludesTrustConfig(t *testing.T) {
 	got := buildTMUXShellCommand(agent.Spec{
 		Command: "claude",
 		BotName: "helper-bot",
 		WorkDir: "/tmp/workspace",
 	})
-	want := `claude -c 'notify=["/abs/path/myclaw", "notify", "claude", "helper-bot"]' -c 'projects."/tmp/workspace".trust_level="trusted"'`
+	want := `claude -c 'projects."/tmp/workspace".trust_level="trusted"'`
 	if got != want {
 		t.Fatalf("buildTMUXShellCommand() = %q, want %q", got, want)
 	}
@@ -290,13 +227,7 @@ func TestTMUXDriver_Init_MissingCommand(t *testing.T) {
 		WorkDir: "/tmp/test",
 	}
 
-	mockFactory := &mockTMUXRuntimeFactory{}
-	mockStoreFactory := &mockTMUXRunStoreFactory{}
-
-	driver := &TMUXDriver{
-		factory:         mockFactory,
-		runStoreFactory: mockStoreFactory,
-	}
+	driver := &TMUXDriver{factory: &mockTMUXRuntimeFactory{}}
 
 	_, err := driver.Init(ctx, spec)
 	if err == nil {
@@ -312,13 +243,7 @@ func TestTMUXDriver_Init_MissingWorkDir(t *testing.T) {
 		WorkDir: "",
 	}
 
-	mockFactory := &mockTMUXRuntimeFactory{}
-	mockStoreFactory := &mockTMUXRunStoreFactory{}
-
-	driver := &TMUXDriver{
-		factory:         mockFactory,
-		runStoreFactory: mockStoreFactory,
-	}
+	driver := &TMUXDriver{factory: &mockTMUXRuntimeFactory{}}
 
 	_, err := driver.Init(ctx, spec)
 	if err == nil {
@@ -334,12 +259,6 @@ func TestTMUXRuntime_Run_Success(t *testing.T) {
 		},
 	}
 
-	runStore := &mockTMUXRunStore{
-		getByRunIDFunc: func(ctx context.Context, runID string) (tmuxRunRecord, error) {
-			return tmuxRunRecord{RunID: runID, Status: "done"}, nil
-		},
-	}
-
 	runtime := &TMUXRuntime{
 		state:   stateReady,
 		pane:    pane,
@@ -349,7 +268,6 @@ func TestTMUXRuntime_Run_Success(t *testing.T) {
 			BotName: "test-bot",
 			WorkDir: t.TempDir(),
 		},
-		runStore: runStore,
 	}
 
 	req := agent.Request{

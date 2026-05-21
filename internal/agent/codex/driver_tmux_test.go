@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,10 +40,7 @@ func TestTMUXDriverInitRejectsEmptyCommand(t *testing.T) {
 
 func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
 	factory := &captureSessionNameFactory{session: &fakeSession{}, pane: &fakePane{captures: []string{readyTMUXCapture}}, created: true}
-	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
+	driver := &TMUXDriver{factory: factory}
 	originalLogf := tmuxInitLogf
 	tmuxInitLogf = func(string, ...any) {}
 	defer func() { tmuxInitLogf = originalLogf }()
@@ -53,11 +49,10 @@ func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err := driver.Init(ctx, agent.Spec{
-		Type:       "codex-tmux",
-		Command:    "/usr/local/bin/codex",
-		BotName:    "helper-bot",
-		WorkDir:    workDir,
-		SQLitePath: "/tmp/myclaw/myclaw.db",
+		Type:    "codex-tmux",
+		Command: "/usr/local/bin/codex",
+		BotName: "helper-bot",
+		WorkDir: workDir,
 	})
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -65,8 +60,7 @@ func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
 	if factory.sessionName != "myclaw-codex-helper-bot" {
 		t.Fatalf("session name = %q", factory.sessionName)
 	}
-	wantCommand := `/usr/local/bin/codex -c 'notify=["/abs/path/myclaw", "notify", "codex", "helper-bot"]' -c ` +
-		tmux.ShellQuote(`projects."`+workDir+`".trust_level="trusted"`)
+	wantCommand := "/usr/local/bin/codex -c " + tmux.ShellQuote(`projects."`+workDir+`".trust_level="trusted"`)
 	if factory.command != wantCommand {
 		t.Fatalf("command = %q, want %q", factory.command, wantCommand)
 	}
@@ -74,10 +68,7 @@ func TestTMUXDriverInitUsesBotNameInSessionName(t *testing.T) {
 
 func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
 	factory := &captureSessionNameFactory{session: &fakeSession{}, pane: &fakePane{captures: []string{readyTMUXCapture}}, created: true}
-	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
+	driver := &TMUXDriver{factory: factory}
 
 	var logs []string
 	originalLogf := tmuxInitLogf
@@ -89,11 +80,10 @@ func TestTMUXDriverInitLogsWaitUntilReadyOutcome(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err := driver.Init(ctx, agent.Spec{
-		Type:       "codex-tmux",
-		Command:    "/usr/local/bin/codex",
-		BotName:    "helper-bot",
-		WorkDir:    t.TempDir(),
-		SQLitePath: "/tmp/myclaw/myclaw.db",
+		Type:    "codex-tmux",
+		Command: "/usr/local/bin/codex",
+		BotName: "helper-bot",
+		WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -112,10 +102,7 @@ func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
 		},
 		created: true,
 	}
-	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
+	driver := &TMUXDriver{factory: factory}
 
 	var logs []string
 	originalLogf := tmuxInitLogf
@@ -127,11 +114,10 @@ func TestTMUXDriverInitLogsWaitUntilReadyFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err := driver.Init(ctx, agent.Spec{
-		Type:       "codex-tmux",
-		Command:    "/usr/local/bin/codex",
-		BotName:    "helper-bot",
-		WorkDir:    t.TempDir(),
-		SQLitePath: "/tmp/myclaw/myclaw.db",
+		Type:    "codex-tmux",
+		Command: "/usr/local/bin/codex",
+		BotName: "helper-bot",
+		WorkDir: t.TempDir(),
 	})
 	if err == nil {
 		t.Fatal("expected Init() error")
@@ -150,10 +136,7 @@ func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 		},
 		created: false,
 	}
-	driver := &TMUXDriver{factory: factory, runStoreFactory: &fakeRunStoreFactory{store: &fakeRunStore{}}}
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
+	driver := &TMUXDriver{factory: factory}
 
 	var logs []string
 	originalLogf := tmuxInitLogf
@@ -165,11 +148,10 @@ func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	runtime, err := driver.Init(ctx, agent.Spec{
-		Type:       "codex-tmux",
-		Command:    "/usr/local/bin/codex",
-		BotName:    "helper-bot",
-		WorkDir:    t.TempDir(),
-		SQLitePath: "/tmp/myclaw/myclaw.db",
+		Type:    "codex-tmux",
+		Command: "/usr/local/bin/codex",
+		BotName: "helper-bot",
+		WorkDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Init() error = %v", err)
@@ -185,11 +167,7 @@ func TestTMUXDriverInitSkipsWaitUntilReadyForExistingSession(t *testing.T) {
 	}
 }
 
-func TestBuildTMUXSessionOptionsUsesWorkspaceAndNotifyCommand(t *testing.T) {
-	originalExecutable := currentExecutablePath
-	currentExecutablePath = func() (string, error) { return "/abs/path/myclaw", nil }
-	defer func() { currentExecutablePath = originalExecutable }()
-
+func TestBuildTMUXSessionOptionsUsesWorkspaceTrustConfig(t *testing.T) {
 	options := buildTMUXSessionOptions(agent.Spec{
 		Command: "/usr/local/bin/codex",
 		BotName: "helper-bot",
@@ -202,25 +180,20 @@ func TestBuildTMUXSessionOptionsUsesWorkspaceAndNotifyCommand(t *testing.T) {
 	if options.StartDirectory != "/tmp/myclaw/bots/bot_1/workspace" {
 		t.Fatalf("StartDirectory = %q", options.StartDirectory)
 	}
-	want := `/usr/local/bin/codex -c 'notify=["/abs/path/myclaw", "notify", "codex", "helper-bot"]' -c 'projects."/tmp/myclaw/bots/bot_1/workspace".trust_level="trusted"'`
+	want := `/usr/local/bin/codex -c 'projects."/tmp/myclaw/bots/bot_1/workspace".trust_level="trusted"'`
 	if options.ShellCommand != want {
 		t.Fatalf("ShellCommand = %q, want %q", options.ShellCommand, want)
 	}
 }
 
 func TestTMUXRuntimeRunSuccessfulSingleRequest(t *testing.T) {
-	workDir := t.TempDir()
-	store := &fakeRunStore{
-		statuses: []string{"pending", "done"},
-	}
 	runtime := &TMUXRuntime{
-		state:    stateReady,
-		pane:     &fakePane{captures: []string{"assistant response: say hello\ncodex>\n"}},
-		runStore: store,
+		state: stateReady,
+		pane:  &fakePane{captures: []string{"assistant response: say hello\ncodex>\n"}},
 		spec: agent.Spec{
 			Type:    "codex-tmux",
 			BotName: "helper-bot",
-			WorkDir: workDir,
+			WorkDir: t.TempDir(),
 		},
 	}
 
@@ -241,23 +214,12 @@ func TestTMUXRuntimeRunSuccessfulSingleRequest(t *testing.T) {
 			t.Fatalf("SendKeys() arg[%d] = %q, want %q", i, got, want[i])
 		}
 	}
-	if len(store.created) != 1 {
-		t.Fatalf("CreatePending() calls = %d", len(store.created))
-	}
-	runIDBytes, err := os.ReadFile(filepath.Join(workDir, currentTMUXRunIDFileName))
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if strings.TrimSpace(string(runIDBytes)) != store.created[0] {
-		t.Fatalf("run id file = %q, want %q", strings.TrimSpace(string(runIDBytes)), store.created[0])
-	}
 }
 
 func TestTMUXRuntimeRunMarksBrokenOnSendFailure(t *testing.T) {
 	runtime := &TMUXRuntime{
-		state:    stateReady,
-		pane:     &fakePane{sendErr: errors.New("send boom")},
-		runStore: &fakeRunStore{},
+		state: stateReady,
+		pane:  &fakePane{sendErr: errors.New("send boom")},
 		spec: agent.Spec{
 			BotName: "helper-bot",
 			WorkDir: t.TempDir(),
@@ -284,7 +246,6 @@ func TestTMUXRuntimeRunMarksBrokenOnCaptureFailure(t *testing.T) {
 			captureErrAt: 0,
 			captureErr:   errors.New("capture boom"),
 		},
-		runStore: &fakeRunStore{statuses: []string{"done"}},
 		spec: agent.Spec{
 			BotName: "helper-bot",
 			WorkDir: t.TempDir(),
@@ -318,32 +279,6 @@ func TestTMUXRuntimeWaitUntilReadyWaitsForCodexInterface(t *testing.T) {
 	}
 	if runtime.pane.(*fakePane).captureCalls < 2 {
 		t.Fatalf("captureCalls = %d, want at least 2", runtime.pane.(*fakePane).captureCalls)
-	}
-}
-
-func TestTMUXRuntimeRunMarksBrokenOnTimeout(t *testing.T) {
-	workDir := t.TempDir()
-	runtime := &TMUXRuntime{
-		state:    stateReady,
-		waitGap:  time.Nanosecond,
-		pane:     &fakePane{captures: []string{"still running\n", "still running\n"}},
-		runStore: &fakeRunStore{statuses: []string{"pending", "pending", "pending"}},
-		spec: agent.Spec{
-			Type:    "codex-tmux",
-			BotName: "helper-bot",
-			WorkDir: workDir,
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-	defer cancel()
-
-	_, err := runtime.Run(ctx, agent.Request{Prompt: "say hello"})
-	if err == nil || !strings.Contains(err.Error(), "codex tmux run timed out") {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if runtime.state != stateBroken {
-		t.Fatalf("state = %q", runtime.state)
 	}
 }
 
@@ -482,30 +417,10 @@ type fakeSession struct {
 	kill      func() error
 }
 
-type fakeRunStoreFactory struct {
-	store tmuxRunStore
-	err   error
-}
-
-type fakeRunStore struct {
-	created     []string
-	statuses    []string
-	statusIndex int
-	getErr      error
-	createErr   error
-}
-
 func (f *captureSessionNameFactory) Start(_ context.Context, spec agent.Spec, sessionName string) (tmux.Session, tmux.Pane, bool, error) {
 	f.sessionName = sessionName
 	f.command = spec.Command
 	return f.session, f.pane, f.created, f.err
-}
-
-func (f *fakeRunStoreFactory) Open(_ agent.Spec) (tmuxRunStore, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.store, nil
 }
 
 func (p *fakePane) SendKeys(keys ...string) error {
@@ -540,32 +455,4 @@ func (s *fakeSession) Kill() error {
 		return s.kill()
 	}
 	return s.killErr
-}
-
-func (s *fakeRunStore) CreatePending(_ context.Context, runID, _ string, _ string) error {
-	if s.createErr != nil {
-		return s.createErr
-	}
-	s.created = append(s.created, runID)
-	return nil
-}
-
-func (s *fakeRunStore) UpsertDone(context.Context, string, string, string) error {
-	return nil
-}
-
-func (s *fakeRunStore) GetByRunID(_ context.Context, runID string) (tmuxRunRecord, error) {
-	if s.getErr != nil {
-		return tmuxRunRecord{}, s.getErr
-	}
-	status := "pending"
-	if len(s.statuses) > 0 {
-		if s.statusIndex >= len(s.statuses) {
-			status = s.statuses[len(s.statuses)-1]
-		} else {
-			status = s.statuses[s.statusIndex]
-			s.statusIndex++
-		}
-	}
-	return tmuxRunRecord{RunID: runID, Status: status}, nil
 }
