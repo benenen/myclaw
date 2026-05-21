@@ -111,7 +111,7 @@ func TestAgentCapabilityDiscovererRefreshesCurrentEnvironment(t *testing.T) {
 	if codex.LastDetectedAt == nil || codex.LastDetectedAt.IsZero() {
 		t.Fatal("expected codex last_detected_at")
 	}
-	wantModes := []string{"codex-exec", "codex-tmux", "codex-acp"}
+	wantModes := []string{"codex-exec", "codex-acp"}
 	if !reflect.DeepEqual(codex.SupportedModes, wantModes) {
 		t.Fatalf("unexpected codex supported modes: %v", codex.SupportedModes)
 	}

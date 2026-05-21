@@ -106,13 +106,13 @@ func TestBotCLIResolverResolveAssignsSQLitePath(t *testing.T) {
 		ID:                "bot_1",
 		Name:              "helper-bot",
 		AgentCapabilityID: "cap_codex",
-		AgentMode:         "codex-tmux",
+		AgentMode:         "codex-exec",
 	})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_codex": {
 			ID:             "cap_codex",
 			Command:        "/usr/local/bin/codex",
-			SupportedModes: []string{"codex-tmux"},
+			SupportedModes: []string{"codex-exec"},
 			Available:      true,
 		},
 	}}
