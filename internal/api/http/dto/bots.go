@@ -3,6 +3,7 @@ package dto
 type CreateBotRequest struct {
 	UserID            string `json:"user_id"`
 	Name              string `json:"name"`
+	Type              string `json:"type"`
 	ChannelType       string `json:"channel_type"`
 	AgentCapabilityID string `json:"agent_capability_id,omitempty"`
 	AgentMode         string `json:"agent_mode,omitempty"`
@@ -11,6 +12,7 @@ type CreateBotRequest struct {
 type CreateBotResponse struct {
 	BotID             string `json:"bot_id"`
 	Name              string `json:"name"`
+	Type              string `json:"type"`
 	ChannelType       string `json:"channel_type"`
 	ConnectionStatus  string `json:"connection_status"`
 	ChannelAccountID  string `json:"channel_account_id,omitempty"`
@@ -21,6 +23,7 @@ type CreateBotResponse struct {
 type BotResponse struct {
 	BotID             string `json:"bot_id"`
 	Name              string `json:"name"`
+	Type              string `json:"type"`
 	ChannelType       string `json:"channel_type"`
 	ConnectionStatus  string `json:"connection_status"`
 	ChannelAccountID  string `json:"channel_account_id,omitempty"`

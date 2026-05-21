@@ -11,4 +11,7 @@ const (
 	BotConnectionStatusConnecting    = "connecting"
 	BotConnectionStatusConnected     = "connected"
 	BotConnectionStatusError         = "error"
+
+	BotTypeChannel = "channel"
+	BotTypeHook    = "hook"
 )

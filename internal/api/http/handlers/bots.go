@@ -19,14 +19,15 @@ func CreateBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "invalid request body")
 			return
 		}
-		if req.UserID == "" || req.Name == "" || req.ChannelType == "" {
-			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "user_id, name and channel_type are required")
+		if req.UserID == "" || req.Name == "" {
+			httpapi.WriteError(w, r, "INVALID_ARGUMENT", "user_id and name are required")
 			return
 		}
 
 		result, err := svc.CreateBot(r.Context(), botapp.CreateBotInput{
 			ExternalUserID:    req.UserID,
 			Name:              req.Name,
+			Type:              req.Type,
 			ChannelType:       req.ChannelType,
 			AgentCapabilityID: req.AgentCapabilityID,
 			AgentMode:         req.AgentMode,
@@ -43,6 +44,7 @@ func CreateBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 		httpapi.WriteOKFromRequest(w, r, dto.CreateBotResponse{
 			BotID:             result.BotID,
 			Name:              result.Name,
+			Type:              result.Type,
 			ChannelType:       result.ChannelType,
 			ConnectionStatus:  result.ConnectionStatus,
 			ChannelAccountID:  result.ChannelAccountID,
@@ -75,6 +77,7 @@ func ListBots(svc *botapp.BotService) stdhttp.HandlerFunc {
 			resp = append(resp, dto.BotResponse{
 				BotID:             item.BotID,
 				Name:              item.Name,
+				Type:              item.Type,
 				ChannelType:       item.ChannelType,
 				ConnectionStatus:  item.ConnectionStatus,
 				ChannelAccountID:  item.ChannelAccountID,
@@ -119,6 +122,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 		httpapi.WriteOKFromRequest(w, r, dto.ConfigureBotAgentResponse{
 			BotID:             result.BotID,
 			Name:              result.Name,
+			Type:              result.Type,
 			ChannelType:       result.ChannelType,
 			ConnectionStatus:  result.ConnectionStatus,
 			ChannelAccountID:  result.ChannelAccountID,

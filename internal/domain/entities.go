@@ -58,6 +58,7 @@ type Bot struct {
 	ID                string
 	UserID            string
 	Name              string
+	Type              string
 	ChannelType       string
 	ChannelAccountID  string
 	ConnectionStatus  string

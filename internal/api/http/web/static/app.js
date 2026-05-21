@@ -171,6 +171,7 @@ async function createBot() {
   const body = {
     user_id: userId,
     name,
+    type: botType(),
     agent_capability_id: agentCapabilityID || undefined,
     agent_mode: agentMode || undefined,
   };
@@ -414,7 +415,7 @@ function escapeJs(value) {
 // ── Hook URL ──────────────────────────────────────────────
 
 function hookUrl(botName) {
-  return window.location.origin + '/hooks/' + encodeURIComponent(botName);
+  return window.location.origin + '/hooks/{platform}/' + encodeURIComponent(botName);
 }
 
 function copyHookUrl() {

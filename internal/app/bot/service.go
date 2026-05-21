@@ -50,6 +50,7 @@ func NewBotService(
 type CreateBotInput struct {
 	ExternalUserID    string
 	Name              string
+	Type              string
 	ChannelType       string
 	AgentCapabilityID string
 	AgentMode         string
@@ -58,6 +59,7 @@ type CreateBotInput struct {
 type CreateBotOutput struct {
 	BotID             string
 	Name              string
+	Type              string
 	ChannelType       string
 	ConnectionStatus  string
 	ChannelAccountID  string
@@ -66,19 +68,28 @@ type CreateBotOutput struct {
 }
 
 func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (CreateBotOutput, error) {
-	if input.ExternalUserID == "" || input.Name == "" || input.ChannelType == "" {
+	if input.ExternalUserID == "" || input.Name == "" {
 		return CreateBotOutput{}, domain.ErrInvalidArg
 	}
 	user, err := s.users.FindOrCreateByExternalUserID(ctx, input.ExternalUserID)
 	if err != nil {
 		return CreateBotOutput{}, err
 	}
+	botType := input.Type
+	if botType == "" {
+		botType = domain.BotTypeChannel
+	}
+	connectionStatus := domain.BotConnectionStatusLoginRequired
+	if botType == domain.BotTypeHook {
+		connectionStatus = ""
+	}
 	bot, err := s.bots.Create(ctx, domain.Bot{
 		ID:                domain.NewPrefixedID("bot"),
 		UserID:            user.ID,
 		Name:              input.Name,
+		Type:              botType,
 		ChannelType:       input.ChannelType,
-		ConnectionStatus:  domain.BotConnectionStatusLoginRequired,
+		ConnectionStatus:  connectionStatus,
 		AgentCapabilityID: input.AgentCapabilityID,
 		AgentMode:         input.AgentMode,
 	})
@@ -88,6 +99,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 	return CreateBotOutput{
 		BotID:             bot.ID,
 		Name:              bot.Name,
+		Type:              bot.Type,
 		ChannelType:       bot.ChannelType,
 		ConnectionStatus:  bot.ConnectionStatus,
 		ChannelAccountID:  bot.ChannelAccountID,
@@ -116,6 +128,7 @@ func (s *BotService) DeleteBot(ctx context.Context, botID string) error {
 type BotListItem struct {
 	BotID             string
 	Name              string
+	Type              string
 	ChannelType       string
 	ConnectionStatus  string
 	ChannelAccountID  string
@@ -253,6 +266,7 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 		items = append(items, BotListItem{
 			BotID:             bot.ID,
 			Name:              bot.Name,
+			Type:              bot.Type,
 			ChannelType:       bot.ChannelType,
 			ConnectionStatus:  bot.ConnectionStatus,
 			ChannelAccountID:  bot.ChannelAccountID,
@@ -286,6 +300,7 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 	return BotListItem{
 		BotID:             bot.ID,
 		Name:              bot.Name,
+		Type:              bot.Type,
 		ChannelType:       bot.ChannelType,
 		ConnectionStatus:  bot.ConnectionStatus,
 		ChannelAccountID:  bot.ChannelAccountID,
