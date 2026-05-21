@@ -11,7 +11,10 @@ for processing, and lets the agent directly execute operations via its built-in 
 ```
 POST /hooks/{id}
   → HookManager routes to Hook implementation by {id}
-    → Hook.Handle() validates, extracts data, returns prompt
+    → If a specific Hook is registered:
+      → Hook.Handle() validates, extracts data, returns prompt
+    → If no Hook registered (passthrough mode):
+      → Request body is used directly as prompt
     → HookManager looks up Bot by name matching {id}
     → HookManager sends prompt to agent via agent.Manager.Send()
     → Agent processes data and executes operations (tools, etc.)
@@ -61,13 +64,15 @@ func (m *Manager) HandleHook(w http.ResponseWriter, r *http.Request, platformID 
 - Dependencies injected via constructor
 - `BotRepository` interface abstracts the lookup — existing `BotRepository` will need a `GetByName` method
 - `HandleHook` is the HTTP handler entry point, takes `platformID` as an explicit param
+- **Dispatch logic:** If a Hook is registered for `platformID`, it is called to validate and extract the prompt. Otherwise the request body is read directly (passthrough mode). This means creating a Bot with a matching name is enough for `/hooks/{id}` to work — no Go code required.
 - On webhook request:
-  1. Look up the Hook by `platformID` in the registry, return 404 if not found
-  2. Call `Hook.Handle()` to get prompt, return 400 on validation failure
-  3. Look up Bot by `botRepo.GetByName(platformID)`, return 404 if not found  
-  4. Resolve agent spec via `resolver.Resolve(ctx, bot.ID)`
-  5. Call `executor.Send(ctx, bot.ID, spec, agent.Request{Prompt: prompt})` which returns `(agent.Response, error)` — `Response` has `Text`, `RuntimeType`, `ExitCode`, `Duration`, `RawOutput` fields
-  6. Return `agent.Response.Text` as HTTP 200, body wrapped in existing `Envelope` format
+  1. Look up the Hook by `platformID` in the registry
+  2. If found: call `Hook.Handle()` to get prompt, return 400 on validation failure
+  3. If not found (passthrough): read request body as prompt
+  4. Look up Bot by `botRepo.GetByName(platformID)`, return 404 if not found  
+  5. Resolve agent spec via `resolver.Resolve(ctx, bot.ID)`
+  6. Call `executor.Send(ctx, bot.ID, spec, agent.Request{Prompt: prompt})` which returns `(agent.Response, error)` — `Response` has `Text`, `RuntimeType`, `ExitCode`, `Duration`, `RawOutput` fields
+  7. Return `agent.Response.Text` as HTTP 200, body wrapped in existing `Envelope` format
 
 ### Bot Mapping
 
@@ -77,11 +82,20 @@ Bot name matches the platform ID in the URL. For example:
 
 ### Error Handling
 
-- No hook registered for `{id}` → HTTP 404
+- No bot found for `{id}` → HTTP 404 (whether hook registered or passthrough)
 - Hook validation fails (bad auth, bad data) → HTTP 400 with error details
-- Bot not found → HTTP 404
 - Agent call fails → HTTP 502
 - Agent succeeds → HTTP 200 with agent response text
+
+### Passthrough Mode
+
+If no `Hook` is registered for a platform ID, the Manager falls back to passthrough mode:
+- Reads the raw request body
+- Looks up a Bot whose name matches the platform ID
+- Sends the body content as-is to the agent as a prompt
+
+This means **creating a Bot named `vikunja` is all that's needed** for `/hooks/vikunja` to work.
+Platforms that need signature validation or data transformation can still implement the `Hook` interface.
 
 ## Route Registration
 

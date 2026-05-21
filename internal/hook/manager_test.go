@@ -7,6 +7,7 @@ import (
 	"errors"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/benenen/myclaw/internal/agent"
@@ -86,7 +87,8 @@ func TestManager_RegisterHook(t *testing.T) {
 }
 
 func TestManager_HandleHook_UnknownPlatform(t *testing.T) {
-	mgr := NewManager(&stubBotRepo{}, &stubResolver{}, &stubExecutor{})
+	// No hook registered + no bot found → NOT_FOUND
+	mgr := NewManager(&stubBotRepo{err: domain.ErrNotFound}, &stubResolver{}, &stubExecutor{})
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
@@ -184,4 +186,52 @@ func TestManager_HandleHook_Success(t *testing.T) {
 	if data["text"] != "operation completed" {
 		t.Fatalf("expected text 'operation completed', got %v", data["text"])
 	}
+}
+
+// --- passthrough tests ---
+
+func TestManager_Passthrough_BotNotFound(t *testing.T) {
+	mgr := NewManager(&stubBotRepo{err: domain.ErrNotFound}, &stubResolver{}, &stubExecutor{})
+	w := httptest.NewRecorder()
+	r := newTestRequest(map[string]string{"event": "test"})
+
+	// No hook registered for "myservice", falls through to passthrough
+	mgr.HandleHook(w, r, "myservice")
+	resp := readEnvelope(t, w.Body.Bytes())
+	if resp["code"] != "NOT_FOUND" {
+		t.Fatalf("expected NOT_FOUND, got %v", resp["code"])
+	}
+}
+
+func TestManager_Passthrough_Success(t *testing.T) {
+	var receivedPrompt string
+	mgr := NewManager(
+		&stubBotRepo{bot: domain.Bot{ID: "bot_vikunja", Name: "vikunja"}},
+		&stubResolver{spec: agent.Spec{Type: "opencode-acp"}},
+		&capturingExecutor{fn: func(req agent.Request) (agent.Response, error) {
+			receivedPrompt = req.Prompt
+			return agent.Response{Text: "done"}, nil
+		}},
+	)
+
+	w := httptest.NewRecorder()
+	r := newTestRequest(map[string]string{"task": "sync", "data": "xyz"})
+
+	mgr.HandleHook(w, r, "vikunja")
+	resp := readEnvelope(t, w.Body.Bytes())
+	if resp["code"] != "OK" {
+		t.Fatalf("expected OK, got %v", resp["code"])
+	}
+	if !strings.Contains(receivedPrompt, "task") || !strings.Contains(receivedPrompt, "sync") {
+		t.Fatalf("expected passthrough prompt to contain body content, got: %s", receivedPrompt)
+	}
+}
+
+// capturingExecutor records the prompt sent to it.
+type capturingExecutor struct {
+	fn func(agent.Request) (agent.Response, error)
+}
+
+func (e *capturingExecutor) Send(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
+	return e.fn(req)
 }

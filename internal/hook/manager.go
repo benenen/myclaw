@@ -3,6 +3,7 @@ package hook
 import (
 	"context"
 	"errors"
+	"io"
 	stdhttp "net/http"
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
@@ -53,14 +54,20 @@ func (m *Manager) RegisterHook(hook Hook) {
 // HandleHook processes an incoming webhook request for the given platform ID.
 // It looks up the registered Hook, validates the request, finds the
 // corresponding Bot, sends the prompt to the agent, and returns the result.
+// If no specific Hook is registered, it falls back to passthrough mode:
+// reading the raw request body and sending it as the prompt to the Bot
+// whose name matches the platform ID.
 func (m *Manager) HandleHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string) {
 	hook, ok := m.hooks[platformID]
-	if !ok {
-		httpapi.WriteError(w, r, "NOT_FOUND", "no hook registered for platform: "+platformID)
+	if ok {
+		m.handleWithHook(w, r, platformID, hook)
 		return
 	}
+	m.handlePassthrough(w, r, platformID)
+}
 
-	prompt, err := hook.Handle(r.Context(), r)
+func (m *Manager) handleWithHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string, h Hook) {
+	prompt, err := h.Handle(r.Context(), r)
 	if err != nil {
 		httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
 		return
@@ -76,6 +83,30 @@ func (m *Manager) HandleHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platf
 		return
 	}
 
+	m.sendToAgent(w, r, bot, prompt)
+}
+
+func (m *Manager) handlePassthrough(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string) {
+	bot, err := m.botRepo.GetByName(r.Context(), platformID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			httpapi.WriteError(w, r, "NOT_FOUND", "no hook or bot configured for platform: "+platformID)
+			return
+		}
+		httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpapi.WriteError(w, r, "INVALID_ARGUMENT", "failed to read request body")
+		return
+	}
+
+	m.sendToAgent(w, r, bot, string(body))
+}
+
+func (m *Manager) sendToAgent(w stdhttp.ResponseWriter, r *stdhttp.Request, bot domain.Bot, prompt string) {
 	spec, err := m.resolver.Resolve(r.Context(), bot.ID)
 	if err != nil {
 		httpapi.WriteError(w, r, "INTERNAL_ERROR", "failed to resolve agent spec: "+err.Error())
