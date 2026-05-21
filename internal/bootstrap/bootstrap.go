@@ -10,6 +10,7 @@ import (
 	"github.com/benenen/myclaw/internal/agent"
 	_ "github.com/benenen/myclaw/internal/agent/claude"
 	_ "github.com/benenen/myclaw/internal/agent/codex"
+	_ "github.com/benenen/myclaw/internal/agent/opencode"
 	"github.com/benenen/myclaw/internal/api/http/handlers"
 	"github.com/benenen/myclaw/internal/api/http/web"
 	"github.com/benenen/myclaw/internal/app/bot"

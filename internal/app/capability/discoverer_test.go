@@ -79,6 +79,8 @@ func TestAgentCapabilityDiscovererRefreshesCurrentEnvironment(t *testing.T) {
 			return "/usr/local/bin/codex", nil
 		case "claude":
 			return "", errors.New("not found")
+		case "opencode":
+			return "/usr/local/bin/opencode", nil
 		default:
 			t.Fatalf("unexpected command lookup: %s", name)
 			return "", nil
@@ -89,8 +91,8 @@ func TestAgentCapabilityDiscovererRefreshesCurrentEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 capabilities, got %d", len(items))
+	if len(items) != 3 {
+		t.Fatalf("expected 3 capabilities, got %d", len(items))
 	}
 
 	codex, err := repo.GetByKey(context.Background(), "codex")
@@ -126,6 +128,27 @@ func TestAgentCapabilityDiscovererRefreshesCurrentEnvironment(t *testing.T) {
 	}
 	if claude.LastDetectedAt != nil {
 		t.Fatalf("expected nil last_detected_at, got %v", claude.LastDetectedAt)
+	}
+
+	opencode, err := repo.GetByKey(context.Background(), "opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opencode.Command != "/usr/local/bin/opencode" {
+		t.Fatalf("unexpected opencode command: %q", opencode.Command)
+	}
+	if !opencode.Available {
+		t.Fatal("expected opencode available")
+	}
+	if opencode.DetectionSource != "path_scan" {
+		t.Fatalf("unexpected detection source: %q", opencode.DetectionSource)
+	}
+	if opencode.LastDetectedAt == nil || opencode.LastDetectedAt.IsZero() {
+		t.Fatal("expected opencode last_detected_at")
+	}
+	wantOpencodeModes := []string{"opencode-acp"}
+	if !reflect.DeepEqual(opencode.SupportedModes, wantOpencodeModes) {
+		t.Fatalf("unexpected opencode supported modes: %v", opencode.SupportedModes)
 	}
 }
 
