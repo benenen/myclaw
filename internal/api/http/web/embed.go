@@ -1,17 +1,18 @@
 package web
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
 	"net/http"
 )
 
-//go:embed index.html
-var indexHTML []byte
+//go:embed static
+var staticFS embed.FS
 
 func Handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write(indexHTML)
-	})
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic("web: static subdir: " + err.Error())
+	}
+	return http.FileServer(http.FS(sub))
 }
