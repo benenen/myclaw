@@ -92,7 +92,7 @@ func TestManager_HandleHook_UnknownPlatform(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "unknown")
+	mgr.HandleHook(w, r, "unknown", "some-bot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "NOT_FOUND" {
 		t.Fatalf("expected NOT_FOUND, got %v", resp["code"])
@@ -106,7 +106,7 @@ func TestManager_HandleHook_HookValidationError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "test")
+	mgr.HandleHook(w, r, "test", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "INVALID_ARGUMENT" {
 		t.Fatalf("expected INVALID_ARGUMENT, got %v", resp["code"])
@@ -120,7 +120,7 @@ func TestManager_HandleHook_BotNotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "test")
+	mgr.HandleHook(w, r, "test", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "NOT_FOUND" {
 		t.Fatalf("expected NOT_FOUND, got %v", resp["code"])
@@ -138,7 +138,7 @@ func TestManager_HandleHook_ResolverError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "test")
+	mgr.HandleHook(w, r, "test", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "INTERNAL_ERROR" {
 		t.Fatalf("expected INTERNAL_ERROR, got %v", resp["code"])
@@ -156,7 +156,7 @@ func TestManager_HandleHook_ExecutorError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "test")
+	mgr.HandleHook(w, r, "test", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "INTERNAL_ERROR" {
 		t.Fatalf("expected INTERNAL_ERROR, got %v", resp["code"])
@@ -174,7 +174,7 @@ func TestManager_HandleHook_Success(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(nil)
 
-	mgr.HandleHook(w, r, "test")
+	mgr.HandleHook(w, r, "test", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "OK" {
 		t.Fatalf("expected OK, got %v", resp["code"])
@@ -196,7 +196,7 @@ func TestManager_Passthrough_BotNotFound(t *testing.T) {
 	r := newTestRequest(map[string]string{"event": "test"})
 
 	// No hook registered for "myservice", falls through to passthrough
-	mgr.HandleHook(w, r, "myservice")
+	mgr.HandleHook(w, r, "myservice", "mybot")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "NOT_FOUND" {
 		t.Fatalf("expected NOT_FOUND, got %v", resp["code"])
@@ -217,7 +217,7 @@ func TestManager_Passthrough_Success(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := newTestRequest(map[string]string{"task": "sync", "data": "xyz"})
 
-	mgr.HandleHook(w, r, "vikunja")
+	mgr.HandleHook(w, r, "vikunja", "vikunja")
 	resp := readEnvelope(t, w.Body.Bytes())
 	if resp["code"] != "OK" {
 		t.Fatalf("expected OK, got %v", resp["code"])

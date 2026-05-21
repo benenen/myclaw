@@ -51,32 +51,31 @@ func (m *Manager) RegisterHook(hook Hook) {
 	m.hooks[hook.ID()] = hook
 }
 
-// HandleHook processes an incoming webhook request for the given platform ID.
-// It looks up the registered Hook, validates the request, finds the
-// corresponding Bot, sends the prompt to the agent, and returns the result.
-// If no specific Hook is registered, it falls back to passthrough mode:
-// reading the raw request body and sending it as the prompt to the Bot
-// whose name matches the platform ID.
-func (m *Manager) HandleHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string) {
-	hook, ok := m.hooks[platformID]
+// HandleHook processes an incoming webhook request for the given platform
+// and bot name. It looks up the registered Hook by platform, validates the
+// request, finds the Bot by name, sends the prompt to the agent, and returns
+// the result. If no specific Hook is registered, it falls back to passthrough
+// mode: reading the raw request body and sending it as the prompt.
+func (m *Manager) HandleHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platform string, botName string) {
+	hook, ok := m.hooks[platform]
 	if ok {
-		m.handleWithHook(w, r, platformID, hook)
+		m.handleWithHook(w, r, botName, hook)
 		return
 	}
-	m.handlePassthrough(w, r, platformID)
+	m.handlePassthrough(w, r, botName)
 }
 
-func (m *Manager) handleWithHook(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string, h Hook) {
+func (m *Manager) handleWithHook(w stdhttp.ResponseWriter, r *stdhttp.Request, botName string, h Hook) {
 	prompt, err := h.Handle(r.Context(), r)
 	if err != nil {
 		httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())
 		return
 	}
 
-	bot, err := m.botRepo.GetByName(r.Context(), platformID)
+	bot, err := m.botRepo.GetByName(r.Context(), botName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			httpapi.WriteError(w, r, "NOT_FOUND", "no bot configured for platform: "+platformID)
+			httpapi.WriteError(w, r, "NOT_FOUND", "no bot found with name: "+botName)
 			return
 		}
 		httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
@@ -86,11 +85,11 @@ func (m *Manager) handleWithHook(w stdhttp.ResponseWriter, r *stdhttp.Request, p
 	m.sendToAgent(w, r, bot, prompt)
 }
 
-func (m *Manager) handlePassthrough(w stdhttp.ResponseWriter, r *stdhttp.Request, platformID string) {
-	bot, err := m.botRepo.GetByName(r.Context(), platformID)
+func (m *Manager) handlePassthrough(w stdhttp.ResponseWriter, r *stdhttp.Request, botName string) {
+	bot, err := m.botRepo.GetByName(r.Context(), botName)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			httpapi.WriteError(w, r, "NOT_FOUND", "no hook or bot configured for platform: "+platformID)
+			httpapi.WriteError(w, r, "NOT_FOUND", "no bot found with name: "+botName)
 			return
 		}
 		httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())

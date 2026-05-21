@@ -34,8 +34,8 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 	mux.Handle("GET /api/v1/agent-capabilities", wrap(ListAgentCapabilities(deps.BotService)))
 
 	if deps.HookManager != nil {
-		mux.Handle("POST /hooks/{id}", wrap(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-			deps.HookManager.HandleHook(w, r, r.PathValue("id"))
+		mux.Handle("POST /hooks/{platform}/{botname}", wrap(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			deps.HookManager.HandleHook(w, r, r.PathValue("platform"), r.PathValue("botname"))
 		}))
 	}
 }
