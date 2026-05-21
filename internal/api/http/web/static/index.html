@@ -117,6 +117,7 @@
 
         <div class="card">
           <span class="card-subtitle">Webhook</span>
+          <p class="card-hint">Send POST requests to this URL — the bot's agent will process the data automatically</p>
           <div class="hook-url-row">
             <code class="hook-url-value" id="detail-hook-url">-</code>
             <button class="btn-secondary" onclick="copyHookUrl()">Copy</button>
@@ -137,6 +138,7 @@
   <div class="modal">
     <h3 class="modal-heading">New Bot</h3>
     <p class="modal-desc">Create a new bot for your channel</p>
+    <p class="modal-hint">Name the bot after your platform (e.g. <strong>vikunja</strong>) to receive webhooks at <code>/hooks/{name}</code></p>
     <div class="form-grid">
       <div class="form-field wide">
         <label>Name</label>

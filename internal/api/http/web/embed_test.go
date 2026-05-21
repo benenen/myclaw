@@ -45,6 +45,11 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 				t.Fatalf("response missing element id %q", id)
 			}
 		}
+		for _, class := range []string{"modal-hint", "card-hint"} {
+			if !strings.Contains(body, class) {
+				t.Fatalf("response missing class %q", class)
+			}
+		}
 		for _, handler := range []string{"copyShareURL()", "saveSelectedBotAgent()", "closeQRModal()", "openCreateBotModal()", "connectSelectedBot()", "closeCreateBotModal()", "copyHookUrl()"} {
 			if !strings.Contains(body, handler) {
 				t.Fatalf("response missing onclick handler %q", handler)
