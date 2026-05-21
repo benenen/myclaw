@@ -137,14 +137,23 @@
 <div class="modal-overlay" id="create-bot-modal">
   <div class="modal">
     <h3 class="modal-heading">New Bot</h3>
-    <p class="modal-desc">Create a new bot for your channel</p>
-    <p class="modal-hint">Name the bot after your platform (e.g. <strong>vikunja</strong>) to receive webhooks at <code>/hooks/{name}</code></p>
+    <p class="modal-desc">Create a new bot</p>
+    <div class="radio-group">
+      <label class="radio-item">
+        <input type="radio" name="bot-type" value="channel" checked onchange="toggleBotType()">
+        <span>Channel</span>
+      </label>
+      <label class="radio-item">
+        <input type="radio" name="bot-type" value="hook" onchange="toggleBotType()">
+        <span>Hook</span>
+      </label>
+    </div>
     <div class="form-grid">
       <div class="form-field wide">
         <label>Name</label>
         <input id="create-bot-name" type="text" placeholder="e.g. sales-bot">
       </div>
-      <div class="form-field wide">
+      <div class="form-field wide" id="create-bot-channel-field">
         <label>Channel</label>
         <select id="create-bot-channel">
           <option value="wechat">wechat</option>

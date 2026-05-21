@@ -771,6 +771,44 @@ input:focus, select:focus {
   color: var(--accent);
 }
 
+/* ── Radio Group ─────────────────────────────────────────── */
+
+.radio-group {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  background: var(--panel-soft);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  border: 1px solid var(--line-soft);
+}
+
+.radio-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.12s;
+  user-select: none;
+}
+
+.radio-item input {
+  display: none;
+}
+
+.radio-item:has(input:checked) {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
 .card-hint {
   font-size: 11.5px;
   color: var(--text-dim);

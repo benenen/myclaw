@@ -35,22 +35,22 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 			t.Fatal("missing app.js script")
 		}
 
-		for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "Webhook"} {
+		for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "Webhook", "Channel", "Hook"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("response missing %q", want)
 			}
 		}
-		for _, id := range []string{"create-bot-capability", "create-bot-mode", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text", "detail-hook-url"} {
+		for _, id := range []string{"create-bot-capability", "create-bot-mode", "create-bot-channel-field", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text", "detail-hook-url"} {
 			if !strings.Contains(body, id) {
 				t.Fatalf("response missing element id %q", id)
 			}
 		}
-		for _, class := range []string{"modal-hint", "card-hint"} {
+		for _, class := range []string{"radio-group", "card-hint"} {
 			if !strings.Contains(body, class) {
 				t.Fatalf("response missing class %q", class)
 			}
 		}
-		for _, handler := range []string{"copyShareURL()", "saveSelectedBotAgent()", "closeQRModal()", "openCreateBotModal()", "connectSelectedBot()", "closeCreateBotModal()", "copyHookUrl()"} {
+		for _, handler := range []string{"copyShareURL()", "saveSelectedBotAgent()", "closeQRModal()", "openCreateBotModal()", "connectSelectedBot()", "closeCreateBotModal()", "copyHookUrl()", "toggleBotType()"} {
 			if !strings.Contains(body, handler) {
 				t.Fatalf("response missing onclick handler %q", handler)
 			}
@@ -72,6 +72,8 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 			"01 · runtime boot",
 			"02 · ingress handling",
 			"03 · downstream relay",
+			"Create a new bot for your channel",
+			"Name the bot after your platform",
 		} {
 			if strings.Contains(body, unwanted) {
 				t.Fatalf("response still contains removed copy %q", unwanted)
@@ -108,6 +110,12 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 		}
 		if !strings.Contains(body, "function copyHookUrl()") {
 			t.Fatal("app.js missing copyHookUrl function")
+		}
+		if !strings.Contains(body, "function botType()") {
+			t.Fatal("app.js missing botType function")
+		}
+		if !strings.Contains(body, "function toggleBotType()") {
+			t.Fatal("app.js missing toggleBotType function")
 		}
 	})
 

@@ -135,7 +135,25 @@ function currentUserId() {
 
 // ── Create Bot Modal ────────────────────────────────────
 
+function botType() {
+  const el = document.querySelector('input[name="bot-type"]:checked');
+  return el ? el.value : 'channel';
+}
+
+function toggleBotType() {
+  const channelField = document.getElementById('create-bot-channel-field');
+  const nameInput = document.getElementById('create-bot-name');
+  if (botType() === 'hook') {
+    channelField.style.display = 'none';
+    nameInput.placeholder = 'e.g. vikunja';
+  } else {
+    channelField.style.display = 'block';
+    nameInput.placeholder = 'e.g. sales-bot';
+  }
+}
+
 function openCreateBotModal() {
+  toggleBotType();
   document.getElementById('create-bot-modal').classList.add('active');
 }
 
@@ -150,13 +168,16 @@ async function createBot() {
   const agentCapabilityID = document.getElementById('create-bot-capability').value;
   const agentMode = document.getElementById('create-bot-mode').value;
   if (!userId || !name) { toast('user_id and name required'); return; }
-  const data = await api('POST', '/bots/create', {
+  const body = {
     user_id: userId,
     name,
-    channel_type: channelType,
-    agent_capability_id: agentCapabilityID,
-    agent_mode: agentMode,
-  });
+    agent_capability_id: agentCapabilityID || undefined,
+    agent_mode: agentMode || undefined,
+  };
+  if (botType() === 'channel') {
+    body.channel_type = channelType;
+  }
+  const data = await api('POST', '/bots/create', body);
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   document.getElementById('create-bot-name').value = '';
   document.getElementById('create-bot-capability').value = '';
