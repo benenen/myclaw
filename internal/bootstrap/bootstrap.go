@@ -19,6 +19,7 @@ import (
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
 	"github.com/benenen/myclaw/internal/domain"
+	"github.com/benenen/myclaw/internal/hook"
 	"github.com/benenen/myclaw/internal/logging"
 	"github.com/benenen/myclaw/internal/security"
 	"github.com/benenen/myclaw/internal/store"
@@ -80,6 +81,7 @@ func New(cfg config.Config) (*App, error) {
 	})
 	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
+	hookManager := hook.NewManager(botRepo, resolver, executor)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
@@ -97,6 +99,7 @@ func New(cfg config.Config) (*App, error) {
 	handlers.RegisterRoutes(mux, handlers.Dependencies{
 		BotService:       botSvc,
 		MessageSimulator: messageSimulator,
+		HookManager:      hookManager,
 	})
 
 	if _, err := discoverer.Refresh(context.Background()); err != nil {

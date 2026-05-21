@@ -6,6 +6,7 @@ import (
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	botapp "github.com/benenen/myclaw/internal/app/bot"
+	"github.com/benenen/myclaw/internal/hook"
 )
 
 type MessageSimulator interface {
@@ -15,6 +16,7 @@ type MessageSimulator interface {
 type Dependencies struct {
 	BotService       *botapp.BotService
 	MessageSimulator MessageSimulator
+	HookManager      *hook.Manager
 }
 
 func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
@@ -30,4 +32,10 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 	mux.Handle("POST /api/v1/bots/simulate-message", wrap(SimulateBotMessage(deps.MessageSimulator)))
 	mux.Handle("GET /api/v1/bots/connect", wrap(RefreshBotLogin(deps.BotService)))
 	mux.Handle("GET /api/v1/agent-capabilities", wrap(ListAgentCapabilities(deps.BotService)))
+
+	if deps.HookManager != nil {
+		mux.Handle("POST /hooks/{id}", wrap(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			deps.HookManager.HandleHook(w, r, r.PathValue("id"))
+		}))
+	}
 }

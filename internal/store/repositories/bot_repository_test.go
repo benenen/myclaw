@@ -83,6 +83,43 @@ func TestBotRepositoryGetByIDPreservesAgentFields(t *testing.T) {
 	}
 }
 
+func TestBotRepositoryGetByName(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, domain.Bot{
+		ID:                "bot_name_1",
+		UserID:            "usr_1",
+		Name:              "vikunja",
+		ChannelType:       "wechat",
+		ConnectionStatus:  domain.BotConnectionStatusLoginRequired,
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-acp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetByName(ctx, "vikunja")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "bot_name_1" {
+		t.Fatalf("unexpected bot id: %s", got.ID)
+	}
+	if got.AgentCapabilityID != "cap_codex" {
+		t.Fatalf("unexpected agent capability id: %s", got.AgentCapabilityID)
+	}
+	if got.AgentMode != "codex-acp" {
+		t.Fatalf("unexpected agent mode: %s", got.AgentMode)
+	}
+
+	if _, err := repo.GetByName(ctx, "nonexistent"); err != domain.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestBotRepositoryListWithAccountsPreservesAgentFields(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	repo := NewBotRepository(db)

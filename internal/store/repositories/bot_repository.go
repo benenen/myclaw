@@ -50,6 +50,17 @@ func (r *BotRepository) GetByID(ctx context.Context, id string) (domain.Bot, err
 	return toDomainBot(m), nil
 }
 
+func (r *BotRepository) GetByName(ctx context.Context, name string) (domain.Bot, error) {
+	var m models.Bot
+	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&m).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return domain.Bot{}, domain.ErrNotFound
+		}
+		return domain.Bot{}, err
+	}
+	return toDomainBot(m), nil
+}
+
 func (r *BotRepository) ListByUserID(ctx context.Context, userID string) ([]domain.Bot, error) {
 	var rows []models.Bot
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at desc").Find(&rows).Error; err != nil {

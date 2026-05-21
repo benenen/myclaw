@@ -74,6 +74,12 @@ func (r *botRepoStub) GetByID(_ context.Context, id string) (domain.Bot, error) 
 	}
 	return r.bot, nil
 }
+func (r *botRepoStub) GetByName(_ context.Context, name string) (domain.Bot, error) {
+	if r.bot.Name != name {
+		return domain.Bot{}, domain.ErrNotFound
+	}
+	return r.bot, nil
+}
 func (r *botRepoStub) ListByUserID(context.Context, string) ([]domain.Bot, error) {
 	panic("unexpected call")
 }
