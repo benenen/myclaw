@@ -38,6 +38,13 @@ jobs:
     needs: binaries
     permissions:
       packages: write
+    strategy:
+      matrix:
+        variant:
+          - { target: runtime-base,     suffix: "" }
+          - { target: myclaw-codex,     suffix: "-codex" }
+          - { target: myclaw-opencode,  suffix: "-opencode" }
+          - { target: myclaw-cc,        suffix: "-cc" }
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +61,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/${{ github.repository }}${{ matrix.variant.suffix }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -63,6 +70,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
+          target: ${{ matrix.variant.target }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -79,12 +88,7 @@ jobs:
           pattern: myclaw-*
           merge-multiple: true
 
-      - name: Generate changelog
-        run: |
-          git log --pretty=format:'- %s (%h)' $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)..HEAD > CHANGELOG.md
-
       - uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG.md
           files: myclaw-*
           generate_release_notes: true
