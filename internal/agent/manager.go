@@ -48,7 +48,7 @@ func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Ses
 	if err != nil {
 		return nil, err
 	}
-	replacement, err := NewSession(ctx, driver, spec)
+	replacement, err := NewSession(context.Background(), driver, spec)
 	if err != nil {
 		return nil, err
 	}
