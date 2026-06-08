@@ -25,7 +25,7 @@ type AgentCapabilityDiscoverer struct {
 
 var capabilitySeeds = []capabilitySeed{
 	{key: "codex", label: "Codex CLI", command: "codex", supportedModes: []string{"codex-exec", "codex-acp"}},
-	{key: "claude", label: "Claude Code", command: "claude", supportedModes: []string{}},
+	{key: "claude", label: "Claude Code", command: "claude", supportedModes: []string{"claude-acp"}},
 	{key: "opencode", label: "OpenCode", command: "opencode", supportedModes: []string{"opencode-acp"}},
 }
 
