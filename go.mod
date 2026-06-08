@@ -4,9 +4,7 @@ go 1.23.6
 
 require (
 	github.com/GianlucaP106/gotmux v0.5.0
-	github.com/creack/pty v1.1.21
 	github.com/golang-migrate/migrate/v4 v4.18.3
-	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
