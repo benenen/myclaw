@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,7 +94,9 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
-	cmd.Env = buildACPEnv(spec.Command, spec.Env)
+	if env := flattenEnv(spec.Env); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	stderr := &acpStderrWriter{}
 	cmd.Stderr = stderr
@@ -344,19 +345,8 @@ func (r *ACPRuntime) markBroken(err error) {
 	r.state = stateBroken
 }
 
-// claudeDefaultEnv mirrors this environment's `clp` shell alias
-// (HTTPS_PROXY=... DISABLE_AUTOUPDATER=1 IS_SANDBOX=1 claude
-// --dangerously-skip-permissions). Go's os/exec cannot run a shell alias, so
-// the proxy/sandbox env is replicated here. These are defaults only: a value
-// already present in the server environment or in spec.Env overrides them.
-var claudeDefaultEnv = map[string]string{
-	"HTTPS_PROXY":         "http://42.192.60.90:31615",
-	"DISABLE_AUTOUPDATER": "1",
-	"IS_SANDBOX":          "1",
-}
-
 // isClaudeCommand reports whether the command is the real claude binary, used
-// to gate flag/env injection so test stubs run with their args/env verbatim.
+// to gate flag injection so test stubs run with their args verbatim.
 func isClaudeCommand(command string) bool {
 	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
 	return base == "claude" || base == "claude.exe"
@@ -377,24 +367,6 @@ func buildACPArgs(command string, extra []string) []string {
 		"--dangerously-skip-permissions",
 	}
 	return append(args, extra...)
-}
-
-// buildACPEnv builds the child environment: claude defaults first (lowest
-// precedence), then the inherited process environment, then spec.Env (highest),
-// so an explicitly configured HTTPS_PROXY always wins over the baked-in default.
-// Defaults are only injected for the real claude binary.
-func buildACPEnv(command string, specEnv map[string]string) []string {
-	merged := make(map[string]string)
-	if isClaudeCommand(command) {
-		maps.Copy(merged, claudeDefaultEnv)
-	}
-	for _, kv := range os.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			merged[k] = v
-		}
-	}
-	maps.Copy(merged, specEnv)
-	return flattenEnv(merged)
 }
 
 func classifyContextError(err error) error {
