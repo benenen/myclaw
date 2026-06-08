@@ -2,7 +2,9 @@ package tmux
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,19 +60,21 @@ func TestFirstSessionPaneWrapsListPanesFailure(t *testing.T) {
 }
 
 func TestValidateStartupSpecReportsMissingExecutableAndWorkDir(t *testing.T) {
+	missingExe := filepath.Join(t.TempDir(), "missing-codex")
+	missingWorkDir := filepath.Join(t.TempDir(), "missing-workspace")
 	spec := agent.Spec{
-		Command: "/root/.nvm/versions/node/v20.19.2/bin/codex -V",
-		WorkDir: "/root/.myclaw/bots/missing/workspace",
+		Command: missingExe + " -V",
+		WorkDir: missingWorkDir,
 	}
 
 	err := validateStartupSpec(spec)
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), `tmux executable "/root/.nvm/versions/node/v20.19.2/bin/codex" not found`) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("tmux executable %q not found", missingExe)) {
 		t.Fatalf("unexpected error = %v", err)
 	}
-	if !strings.Contains(err.Error(), `tmux workdir "/root/.myclaw/bots/missing/workspace" does not exist`) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("tmux workdir %q does not exist", missingWorkDir)) {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
