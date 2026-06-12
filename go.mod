@@ -13,12 +13,18 @@ require (
 )
 
 require (
+	github.com/google/jsonschema-go v0.3.0 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+)
+
+require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
+	github.com/modelcontextprotocol/go-sdk v0.8.0
 	github.com/spf13/pflag v1.0.9 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
