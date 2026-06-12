@@ -6,6 +6,7 @@ import (
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	botapp "github.com/benenen/myclaw/internal/app/bot"
+	"github.com/benenen/myclaw/internal/channel/httpchan"
 	"github.com/benenen/myclaw/internal/hook"
 )
 
@@ -17,6 +18,7 @@ type Dependencies struct {
 	BotService       *botapp.BotService
 	MessageSimulator MessageSimulator
 	HookManager      *hook.Manager
+	HttpReceiver     *httpchan.Receiver
 }
 
 func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
@@ -37,5 +39,9 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 		mux.Handle("POST /hooks/{platform}/{botname}", wrap(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			deps.HookManager.HandleHook(w, r, r.PathValue("platform"), r.PathValue("botname"))
 		}))
+	}
+
+	if deps.HttpReceiver != nil {
+		mux.Handle("POST /api/v1/channels/http/messages", wrap(SendHttpChannelMessage(deps.HttpReceiver)))
 	}
 }

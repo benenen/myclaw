@@ -24,6 +24,7 @@ func TestFakeProviderCreateAndRefreshBinding(t *testing.T) {
 
 	refreshed, err := provider.RefreshBinding(ctx, channel.RefreshBindingRequest{
 		ProviderBindingRef: created.ProviderBindingRef,
+		ChannelType:        "wechat",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestFakeProviderSimulateConfirm(t *testing.T) {
 
 	refreshed, _ := provider.RefreshBinding(ctx, channel.RefreshBindingRequest{
 		ProviderBindingRef: created.ProviderBindingRef,
+		ChannelType:        "wechat",
 	})
 	if refreshed.ProviderStatus != "confirmed" {
 		t.Fatalf("expected confirmed, got: %s", refreshed.ProviderStatus)
@@ -64,6 +66,7 @@ func TestFakeProviderBuildRuntimeConfig(t *testing.T) {
 
 	cfg, err := provider.BuildRuntimeConfig(ctx, channel.BuildRuntimeConfigRequest{
 		AccountUID:        "wxid_test",
+		ChannelType:       "wechat",
 		CredentialPayload: []byte(`{"session":"x"}`),
 		CredentialVersion: 1,
 	})

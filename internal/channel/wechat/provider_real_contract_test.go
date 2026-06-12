@@ -285,7 +285,7 @@ func TestProviderRefreshBindingUsesQRCodeStatusEndpoint(t *testing.T) {
 	defer ts.Close()
 
 	provider := NewProvider(NewHTTPClient(Config{ReferenceBaseURL: ts.URL}, nil), nil)
-	_, err := provider.RefreshBinding(context.Background(), channel.RefreshBindingRequest{ProviderBindingRef: "qr_token_1"})
+	_, err := provider.RefreshBinding(context.Background(), channel.RefreshBindingRequest{ProviderBindingRef: "qr_token_1", ChannelType: "wechat"})
 	if err != nil {
 		t.Fatal(err)
 	}

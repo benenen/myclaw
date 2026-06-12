@@ -173,7 +173,7 @@ func (s *BotService) RefreshLogin(ctx context.Context, bindingID string) (Refres
 	if err != nil {
 		return RefreshBotLoginOutput{}, err
 	}
-	result, err := s.provider.RefreshBinding(ctx, channel.RefreshBindingRequest{ProviderBindingRef: binding.ProviderBindingRef})
+	result, err := s.provider.RefreshBinding(ctx, channel.RefreshBindingRequest{ProviderBindingRef: binding.ProviderBindingRef, ChannelType: binding.ChannelType})
 	if err != nil {
 		return RefreshBotLoginOutput{}, err
 	}

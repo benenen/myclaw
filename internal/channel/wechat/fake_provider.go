@@ -11,9 +11,9 @@ import (
 )
 
 type FakeProvider struct {
-	mu              sync.Mutex
-	states          map[string]*fakeBindingState
-	runtimeStarted  map[string]bool
+	mu             sync.Mutex
+	states         map[string]*fakeBindingState
+	runtimeStarted map[string]bool
 }
 
 type fakeBindingState struct {

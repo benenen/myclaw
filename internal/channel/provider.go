@@ -25,6 +25,7 @@ type CreateBindingResult struct {
 
 type RefreshBindingRequest struct {
 	ProviderBindingRef string
+	ChannelType        string
 }
 
 type RefreshBindingResult struct {
@@ -41,6 +42,7 @@ type RefreshBindingResult struct {
 
 type BuildRuntimeConfigRequest struct {
 	AccountUID        string
+	ChannelType       string
 	CredentialPayload []byte
 	CredentialVersion int
 }

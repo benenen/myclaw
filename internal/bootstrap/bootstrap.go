@@ -17,6 +17,7 @@ import (
 	"github.com/benenen/myclaw/internal/app/capability"
 	"github.com/benenen/myclaw/internal/app/orchestration"
 	"github.com/benenen/myclaw/internal/channel"
+	"github.com/benenen/myclaw/internal/channel/httpchan"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
 	"github.com/benenen/myclaw/internal/domain"
@@ -72,10 +73,22 @@ func New(cfg config.Config) (*App, error) {
 
 	wechatCfg := wechat.LoadConfig()
 	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
-	provider := wechat.NewProvider(wechatClient, logger)
+	wechatProvider := wechat.NewProvider(wechatClient, logger)
+	wechatReplyGateway := wechat.NewReplyGateway(wechatClient)
+
+	httpReceiver := httpchan.NewReceiver()
+	httpProvider := httpchan.NewProvider(httpReceiver)
+	httpReplyGateway := httpchan.NewReplyGateway()
+
+	multiProvider := channel.NewMultiProvider()
+	multiProvider.Register("wechat", wechatProvider, wechatProvider)
+	multiProvider.Register(httpchan.ChannelType, httpProvider, httpProvider)
+
+	multiReplyGateway := channel.NewMultiReplyGateway()
+	multiReplyGateway.Register("wechat", wechatReplyGateway)
+	multiReplyGateway.Register(httpchan.ChannelType, httpReplyGateway)
 
 	executor := agent.NewManager()
-	replyGateway := wechat.NewReplyGateway(wechatClient)
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
 		Timeout:             botCLITimeout,
 		WorkspaceRoot:       cfg.BotWorkspaceRoot(),
@@ -84,7 +97,7 @@ func New(cfg config.Config) (*App, error) {
 		MCPURL:              cfg.MCPURL,
 		OrchestratorPrompt:  orchestration.OrchestratorPrompt(),
 	})
-	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
+	orchestrator := bot.NewBotMessageOrchestrator(executor, multiReplyGateway, resolver)
 
 	taskStore := orchestration.NewTaskStore()
 	localRunner := orchestration.NewLocalRunner(resolver, executor)
@@ -92,10 +105,10 @@ func New(cfg config.Config) (*App, error) {
 	mcpService := orchestration.NewMCPService(registeredAgentRepo, taskStore, runner)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	hookManager := hook.NewManager(botRepo, resolver, executor)
-	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
+	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, multiProvider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
-	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, provider, botManager)
+	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, multiProvider, botManager)
 	discoverer := capability.NewAgentCapabilityDiscoverer(capabilityRepo, nil)
 	botSvc.SetCapabilityDiscoverer(discoverer)
 
@@ -117,6 +130,7 @@ func New(cfg config.Config) (*App, error) {
 		BotService:       botSvc,
 		MessageSimulator: messageSimulator,
 		HookManager:      hookManager,
+		HttpReceiver:     httpReceiver,
 	})
 
 	if _, err := discoverer.Refresh(context.Background()); err != nil {
