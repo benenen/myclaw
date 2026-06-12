@@ -131,6 +131,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			ChannelAccountID:  result.ChannelAccountID,
 			AgentCapabilityID: result.AgentCapabilityID,
 			AgentMode:         result.AgentMode,
+			Role:              result.Role,
 		})
 	}
 }

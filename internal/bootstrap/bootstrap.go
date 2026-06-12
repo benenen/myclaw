@@ -106,8 +106,9 @@ func New(cfg config.Config) (*App, error) {
 	})
 	mux.Handle("/", web.Handler())
 
-	mux.Handle("/mcp", orchestration.NewMCPHandler(mcpService))
-	mux.Handle("/mcp/", orchestration.NewMCPHandler(mcpService))
+	mcpHandler := orchestration.NewMCPHandler(mcpService)
+	mux.Handle("/mcp", mcpHandler)
+	mux.Handle("/mcp/", mcpHandler)
 
 	handlers.RegisterRoutes(mux, handlers.Dependencies{
 		BotService:       botSvc,
