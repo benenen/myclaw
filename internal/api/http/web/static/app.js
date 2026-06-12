@@ -277,16 +277,26 @@ function renderDetail() {
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
   document.getElementById('detail-hook-url').textContent = hookUrl(bot.name);
 
-  // Only hook bots expose a webhook; HTTP channel bots show their API endpoint and chat.
+  // Only hook bots expose a webhook; HTTP channel bots show their API endpoint.
   document.getElementById('detail-webhook-card').style.display = isHook ? '' : 'none';
   document.getElementById('detail-http-channel-card').style.display = isHttpChannel ? '' : 'none';
   if (isHttpChannel) {
     document.getElementById('detail-http-channel-url').textContent = httpChannelUrl();
   }
-  // WeChat channel bots show QR connect; HTTP channel bots show chat dialog.
-  document.getElementById('detail-connect-card').style.display = isWeChatChannel ? '' : 'none';
-  document.getElementById('detail-chat-card').style.display = isHttpChannel ? '' : 'none';
+
+  // Connect card: WeChat (QR) and HTTP (auto-confirm)
+  const showConnect = isWeChatChannel || isHttpChannel;
+  const connected = bot.connection_status === 'connected';
+  document.getElementById('detail-connect-card').style.display = (showConnect && !connected) ? '' : 'none';
   if (isHttpChannel) {
+    document.getElementById('detail-connect-hint').textContent = 'Connect this bot to start chatting.';
+  } else if (isWeChatChannel) {
+    document.getElementById('detail-connect-hint').textContent = 'Generate a WeChat login QR and link this bot to an account.';
+  }
+
+  // Chat card: HTTP bot only, when connected (runtime active)
+  document.getElementById('detail-chat-card').style.display = (isHttpChannel && connected) ? '' : 'none';
+  if (isHttpChannel && connected) {
     initChatForBot(bot.bot_id);
   }
 
@@ -353,11 +363,19 @@ function startLoginPolling(bindingID) {
 
 async function connectSelectedBot() {
   if (!selectedBotId) { toast('select a bot'); return; }
+  const bot = selectedBot();
   const data = await api('POST', '/bots/connect', { bot_id: selectedBotId });
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const result = data.data;
   activeBindingId = result.binding_id;
   document.getElementById('connect-result').innerHTML = '';
+
+  // HTTP channel auto-confirms — reload immediately to show the chat dialog.
+  if (bot && bot.type === 'channel' && bot.channel_type === 'http') {
+    await loadBots();
+    return;
+  }
+
   if (result.qr_code_payload) {
     showQRModal(result.qr_code_payload, result.qr_share_url, result.status);
   }
