@@ -143,12 +143,18 @@ function botType() {
 function toggleBotType() {
   const channelField = document.getElementById('create-bot-channel-field');
   const nameInput = document.getElementById('create-bot-name');
+  const channelSelect = document.getElementById('create-bot-channel');
   if (botType() === 'hook') {
     channelField.style.display = 'none';
     nameInput.placeholder = 'e.g. vikunja';
+  } else if (botType() === 'http') {
+    channelField.style.display = 'none';
+    nameInput.placeholder = 'e.g. sales-bot';
+    channelSelect.value = 'http';
   } else {
     channelField.style.display = 'block';
     nameInput.placeholder = 'e.g. sales-bot';
+    channelSelect.value = 'wechat';
   }
 }
 
@@ -171,12 +177,15 @@ async function createBot() {
   const body = {
     user_id: userId,
     name,
-    type: botType(),
+    type: botType() === 'http' ? 'channel' : botType(),
     agent_capability_id: agentCapabilityID || undefined,
     agent_mode: agentMode || undefined,
   };
   if (botType() === 'channel') {
     body.channel_type = channelType;
+  }
+  if (botType() === 'http') {
+    body.channel_type = 'http';
   }
   const data = await api('POST', '/bots/create', body);
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
@@ -265,9 +274,10 @@ function renderDetail() {
   empty.style.display = 'none';
   detail.style.display = 'grid';
 
-  // A WeChat channel bot is the only kind that connects via QR login.
+  // A WeChat channel bot connects via QR login; an HTTP channel bot auto-connects.
   const isHook = bot.type === 'hook';
   const isWeChatChannel = bot.type === 'channel' && bot.channel_type === 'wechat';
+  const isHttpChannel = bot.type === 'channel' && bot.channel_type === 'http';
 
   document.getElementById('detail-name').textContent = bot.name;
   document.getElementById('detail-status-badge').innerHTML = statusBadge(bot.connection_status);
@@ -276,9 +286,19 @@ function renderDetail() {
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
   document.getElementById('detail-hook-url').textContent = hookUrl(bot.name);
 
-  // Only hook bots expose a webhook; only WeChat channel bots expose QR connect.
+  // Only hook bots expose a webhook; HTTP channel bots show their API endpoint.
   document.getElementById('detail-webhook-card').style.display = isHook ? '' : 'none';
-  document.getElementById('detail-connect-card').style.display = isWeChatChannel ? '' : 'none';
+  document.getElementById('detail-http-channel-card').style.display = isHttpChannel ? '' : 'none';
+  if (isHttpChannel) {
+    document.getElementById('detail-http-channel-url').textContent = httpChannelUrl();
+  }
+  // WeChat channel bots show QR connect; HTTP channel bots show auto-connect.
+  document.getElementById('detail-connect-card').style.display = (isWeChatChannel || isHttpChannel) ? '' : 'none';
+  if (isHttpChannel) {
+    document.getElementById('detail-connect-hint').textContent = 'Connect this bot to start receiving messages via API.';
+  } else {
+    document.getElementById('detail-connect-hint').textContent = 'Generate a WeChat login QR and link this bot to an account.';
+  }
 
   renderSelectedBotAgentControls();
   if (!activeBindingId) {
@@ -434,6 +454,16 @@ function copyHookUrl() {
   if (!bot) { toast('select a bot'); return; }
   const url = hookUrl(bot.name);
   navigator.clipboard.writeText(url).then(() => toast('hook url copied')).catch(() => toast('copy failed'));
+}
+
+// ── HTTP Channel URL ───────────────────────────────────────
+
+function httpChannelUrl() {
+  return window.location.origin + '/api/v1/channels/http/messages';
+}
+
+function copyHttpChannelUrl() {
+  navigator.clipboard.writeText(httpChannelUrl()).then(() => toast('http channel url copied')).catch(() => toast('copy failed'));
 }
 
 // ── Bootstrap ───────────────────────────────────────────
