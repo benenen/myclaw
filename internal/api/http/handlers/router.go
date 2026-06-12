@@ -43,5 +43,6 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 
 	if deps.HttpReceiver != nil {
 		mux.Handle("POST /api/v1/channels/http/messages", wrap(SendHttpChannelMessage(deps.HttpReceiver)))
+		mux.Handle("POST /api/v1/channels/http/chat", wrap(ChatWithHttpChannel(deps.HttpReceiver)))
 	}
 }

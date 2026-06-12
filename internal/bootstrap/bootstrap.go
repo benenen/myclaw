@@ -78,7 +78,7 @@ func New(cfg config.Config) (*App, error) {
 
 	httpReceiver := httpchan.NewReceiver()
 	httpProvider := httpchan.NewProvider(httpReceiver)
-	httpReplyGateway := httpchan.NewReplyGateway()
+	httpReplyGateway := httpchan.NewReplyGatewayWithReceiver(httpReceiver)
 
 	multiProvider := channel.NewMultiProvider()
 	multiProvider.Register("wechat", wechatProvider, wechatProvider)

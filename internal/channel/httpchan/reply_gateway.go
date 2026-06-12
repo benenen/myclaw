@@ -14,12 +14,22 @@ import (
 )
 
 type ReplyGateway struct {
-	client *http.Client
+	client   *http.Client
+	receiver *Receiver
 }
 
 func NewReplyGateway() *ReplyGateway {
 	return &ReplyGateway{
 		client: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// NewReplyGatewayWithReceiver creates a ReplyGateway that also delivers
+// replies to in-process chat waiters (for the built-in web console chat).
+func NewReplyGatewayWithReceiver(receiver *Receiver) *ReplyGateway {
+	return &ReplyGateway{
+		client:   &http.Client{Timeout: 10 * time.Second},
+		receiver: receiver,
 	}
 }
 
@@ -34,6 +44,15 @@ func (g *ReplyGateway) Reply(ctx context.Context, target channel.ReplyTarget, re
 	text := strings.TrimSpace(resp.Text)
 	if text == "" {
 		return nil
+	}
+
+	// Try to deliver to an in-process chat waiter first.
+	botID := target.MetadataValue("bot_id")
+	messageID := target.MetadataValue("message_id")
+	if g.receiver != nil && botID != "" && messageID != "" {
+		if g.receiver.DeliverChatReply(botID, messageID, resp) {
+			return nil
+		}
 	}
 
 	callbackURL := strings.TrimSpace(target.MetadataValue("callback_url"))

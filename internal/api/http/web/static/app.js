@@ -277,18 +277,17 @@ function renderDetail() {
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
   document.getElementById('detail-hook-url').textContent = hookUrl(bot.name);
 
-  // Only hook bots expose a webhook; HTTP channel bots show their API endpoint.
+  // Only hook bots expose a webhook; HTTP channel bots show their API endpoint and chat.
   document.getElementById('detail-webhook-card').style.display = isHook ? '' : 'none';
   document.getElementById('detail-http-channel-card').style.display = isHttpChannel ? '' : 'none';
   if (isHttpChannel) {
     document.getElementById('detail-http-channel-url').textContent = httpChannelUrl();
   }
-  // WeChat channel bots show QR connect; HTTP channel bots show auto-connect.
-  document.getElementById('detail-connect-card').style.display = (isWeChatChannel || isHttpChannel) ? '' : 'none';
+  // WeChat channel bots show QR connect; HTTP channel bots show chat dialog.
+  document.getElementById('detail-connect-card').style.display = isWeChatChannel ? '' : 'none';
+  document.getElementById('detail-chat-card').style.display = isHttpChannel ? '' : 'none';
   if (isHttpChannel) {
-    document.getElementById('detail-connect-hint').textContent = 'Connect this bot to start receiving messages via API.';
-  } else {
-    document.getElementById('detail-connect-hint').textContent = 'Generate a WeChat login QR and link this bot to an account.';
+    initChatForBot(bot.bot_id);
   }
 
   renderSelectedBotAgentControls();
@@ -455,6 +454,68 @@ function httpChannelUrl() {
 
 function copyHttpChannelUrl() {
   navigator.clipboard.writeText(httpChannelUrl()).then(() => toast('http channel url copied')).catch(() => toast('copy failed'));
+}
+
+// ── HTTP Channel Chat ─────────────────────────────────────
+
+let chatBotId = '';
+let chatSending = false;
+
+function initChatForBot(botId) {
+  if (chatBotId === botId) return;
+  chatBotId = botId;
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = '<div class="chat-msg notice">Chat with <code>' + escapeHtml(botId) + '</code></div>';
+  document.getElementById('chat-input').value = '';
+}
+
+function handleChatKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendChatMessage();
+  }
+}
+
+async function sendChatMessage() {
+  if (chatSending) return;
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text || !chatBotId) return;
+
+  chatSending = true;
+  input.value = '';
+  input.disabled = true;
+
+  appendChatBubble('user', text);
+
+  try {
+    const data = await api('POST', '/channels/http/chat', {
+      bot_id: chatBotId,
+      text: text,
+    });
+    if (data.code === 'OK' && data.data && data.data.text) {
+      appendChatBubble('bot', data.data.text);
+    } else if (data.code === 'TIMEOUT') {
+      appendChatBubble('bot', '⏱ 处理超时，请重试。');
+    } else {
+      appendChatBubble('bot', '❌ ' + (data.message || data.code || 'error'));
+    }
+  } catch (e) {
+    appendChatBubble('bot', '❌ 网络错误：' + e.message);
+  } finally {
+    chatSending = false;
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+function appendChatBubble(role, text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'chat-bubble ' + role;
+  div.textContent = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
 }
 
 // ── Bootstrap ───────────────────────────────────────────

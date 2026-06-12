@@ -150,6 +150,21 @@
           </button>
           <div id="connect-result"></div>
         </div>
+
+        <div class="card" id="detail-chat-card" style="display:none;">
+          <span class="card-subtitle"><span class="marker-label">// CHAT</span></span>
+          <div class="chat-container">
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input-row">
+              <input id="chat-input" type="text" placeholder="Type a message…" onkeydown="handleChatKeydown(event)">
+              <button class="btn-primary chat-send-btn" onclick="sendChatMessage()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
