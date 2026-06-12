@@ -15,3 +15,19 @@ const (
 	BotTypeChannel = "channel"
 	BotTypeHook    = "hook"
 )
+
+// Bot roles. Orchestrator bots are the "brain"; empty means a normal bot.
+const (
+	BotRoleOrchestrator = "orchestrator"
+)
+
+// Sub-agent types (Bot.Type) and registry kinds.
+const (
+	BotTypeSubagent = "subagent"
+
+	RegisteredAgentKindLocal  = "local"
+	RegisteredAgentKindRemote = "remote"
+
+	RegisteredAgentHealthy   = "healthy"
+	RegisteredAgentUnhealthy = "unhealthy"
+)
