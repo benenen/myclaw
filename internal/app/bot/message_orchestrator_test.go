@@ -1507,3 +1507,43 @@ func (g *recordingReplyGateway) targets() []string {
 	defer g.mu.Unlock()
 	return append([]string(nil), g.tos...)
 }
+
+func waitForReplyCount(t *testing.T, gw *recordingReplyGateway, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(gw.texts()) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("expected at least %d replies, got %d: %v", n, len(gw.texts()), gw.texts())
+}
+
+func TestOrchestratorAcksThenPushesFinal(t *testing.T) {
+	resolver := fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
+		return agent.Spec{Orchestrator: true, Timeout: time.Minute, QueueSize: 1}, nil
+	}}
+	exec := &fakeExecutor{send: func(context.Context, string, agent.Spec, agent.Request) (agent.Response, error) {
+		return agent.Response{Text: "final answer"}, nil
+	}}
+	replies := &recordingReplyGateway{}
+
+	o := NewBotMessageOrchestrator(exec, replies, resolver)
+	o.HandleMessage(context.Background(), InboundMessage{
+		BotID:     "brain_1",
+		MessageID: "m1",
+		From:      "user_1",
+		Text:      "do a big thing",
+	})
+
+	// Expect: first reply is the ack, then (async) the final answer.
+	waitForReplyCount(t, replies, 2)
+	got := replies.texts()
+	if got[0] != ackReply {
+		t.Fatalf("expected ack first, got %q", got[0])
+	}
+	if got[len(got)-1] != "final answer" {
+		t.Fatalf("expected final answer last, got %q", got[len(got)-1])
+	}
+}

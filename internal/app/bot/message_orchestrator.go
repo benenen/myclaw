@@ -16,6 +16,7 @@ const (
 	busyReply              = "当前请求较多，请稍后再试。"
 	timeoutReply           = "处理超时，请稍后重试。"
 	failedReply            = "处理失败，请稍后重试。"
+	ackReply               = "收到，正在处理…"
 	seenMessageTTL         = 10 * time.Minute
 	cleanupInterval        = time.Minute
 	workerIdleTimeout      = seenMessageTTL
@@ -283,6 +284,11 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 	o.resizeWorkerQueue(botID, queueSize)
 	o.waitForQueueCapacity(botID, queueSize)
 
+	if spec.Orchestrator {
+		o.runOrchestratorTurn(botID, msg, spec)
+		return
+	}
+
 	ctx, cancel := o.processingContext(msg.Ctx, spec.Timeout)
 	defer cancel()
 
@@ -325,6 +331,40 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 
 	o.replyWithTimeout(ctx, msg, result.resp)
 	o.finishMessageEventually(msg, true)
+}
+
+// runOrchestratorTurn acks immediately and runs the brain turn detached so the
+// channel worker is freed; the final answer is pushed over the saved target.
+func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMessage, spec agent.Spec) {
+	o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
+
+	base := context.WithoutCancel(msg.Ctx)
+	timeout := spec.Timeout
+	go func() {
+		ctx := base
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			ctx, cancel = context.WithTimeout(base, timeout)
+			defer cancel()
+		}
+		resp, err := o.executor.Send(ctx, msg.BotID, spec, agent.Request{
+			BotID:     msg.BotID,
+			UserID:    msg.From,
+			MessageID: msg.MessageID,
+			Prompt:    msg.Text,
+		})
+		if err != nil {
+			replyText := failedReply
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				replyText = timeoutReply
+			}
+			o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
+			o.finishMessageEventually(msg, false)
+			return
+		}
+		o.replyWithTimeout(ctx, msg, resp)
+		o.finishMessageEventually(msg, true)
+	}()
 }
 
 func (o *BotMessageOrchestrator) processingContext(parent context.Context, minTimeout time.Duration) (context.Context, context.CancelFunc) {
