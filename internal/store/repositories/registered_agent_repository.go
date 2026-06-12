@@ -77,7 +77,14 @@ func (r *RegisteredAgentRepository) List(ctx context.Context) ([]domain.Register
 }
 
 func (r *RegisteredAgentRepository) DeleteByID(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.RegisteredAgent{}).Error
+	result := r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.RegisteredAgent{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func toDomainRegisteredAgent(m models.RegisteredAgent) domain.RegisteredAgent {

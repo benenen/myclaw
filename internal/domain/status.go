@@ -12,8 +12,9 @@ const (
 	BotConnectionStatusConnected     = "connected"
 	BotConnectionStatusError         = "error"
 
-	BotTypeChannel = "channel"
-	BotTypeHook    = "hook"
+	BotTypeChannel  = "channel"
+	BotTypeHook     = "hook"
+	BotTypeSubagent = "subagent"
 )
 
 // Bot roles. Orchestrator bots are the "brain"; empty means a normal bot.
@@ -21,10 +22,8 @@ const (
 	BotRoleOrchestrator = "orchestrator"
 )
 
-// Sub-agent types (Bot.Type) and registry kinds.
+// Sub-agent registry kinds and health values.
 const (
-	BotTypeSubagent = "subagent"
-
 	RegisteredAgentKindLocal  = "local"
 	RegisteredAgentKindRemote = "remote"
 
