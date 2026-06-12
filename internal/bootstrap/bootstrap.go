@@ -88,7 +88,7 @@ func New(cfg config.Config) (*App, error) {
 
 	taskStore := orchestration.NewTaskStore()
 	localRunner := orchestration.NewLocalRunner(resolver, executor)
-	runner := orchestration.NewRunner(localRunner, nil) // remote runner added in M6
+	runner := orchestration.NewRunner(localRunner, orchestration.NewA2AClient(nil))
 	mcpService := orchestration.NewMCPService(registeredAgentRepo, taskStore, runner)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	hookManager := hook.NewManager(botRepo, resolver, executor)
@@ -110,6 +110,9 @@ func New(cfg config.Config) (*App, error) {
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)
 
+	mux.Handle("POST /a2a/register", orchestration.RegisterHandler(registeredAgentRepo))
+	mux.Handle("POST /a2a/heartbeat", orchestration.HeartbeatHandler(registeredAgentRepo))
+
 	handlers.RegisterRoutes(mux, handlers.Dependencies{
 		BotService:       botSvc,
 		MessageSimulator: messageSimulator,
@@ -123,6 +126,8 @@ func New(cfg config.Config) (*App, error) {
 	if err := orchestration.SyncLocalAgents(context.Background(), botRepo, registeredAgentRepo); err != nil {
 		logger.Info("local sub-agent registration failed", "error", err)
 	}
+
+	orchestration.StartHealthSweeper(context.Background(), registeredAgentRepo, 90*time.Second, 30*time.Second)
 
 	go func() {
 		ctx := context.Background()
