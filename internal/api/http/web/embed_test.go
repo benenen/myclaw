@@ -25,7 +25,7 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 		if !strings.HasPrefix(body, "<!DOCTYPE html>") {
 			t.Fatal("response is not HTML")
 		}
-		if !strings.Contains(body, "<title>myclaw Bots</title>") {
+		if !strings.Contains(body, "<title>myclaw · console</title>") {
 			t.Fatal("missing title")
 		}
 		if !strings.Contains(body, "href=\"style.css\"") {
@@ -35,12 +35,12 @@ func TestHandlerServesStaticFiles(t *testing.T) {
 			t.Fatal("missing app.js script")
 		}
 
-		for _, want := range []string{"myclaw", "Bots", "Bot List", "New Bot", "Login / Connect", "Webhook", "Channel", "Hook"} {
+		for _, want := range []string{"myclaw", "Bots", "New Bot", "Login / Connect", "WEBHOOK", "Channel", "Hook"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("response missing %q", want)
 			}
 		}
-		for _, id := range []string{"create-bot-capability", "create-bot-mode", "create-bot-channel-field", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text", "detail-hook-url"} {
+		for _, id := range []string{"create-bot-capability", "create-bot-mode", "create-bot-channel-field", "detail-agent-capability", "detail-agent-mode", "qr-modal", "qr-share-link", "qr-status-text", "detail-hook-url", "detail-webhook-card", "detail-connect-card"} {
 			if !strings.Contains(body, id) {
 				t.Fatalf("response missing element id %q", id)
 			}

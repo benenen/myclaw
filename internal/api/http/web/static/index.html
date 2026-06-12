@@ -3,48 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#f3f4f8">
-<title>myclaw Bots</title>
+<meta name="theme-color" content="#0b0b0d">
+<title>myclaw · console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="grain" aria-hidden="true"></div>
+
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-marker"></div>
+      <div class="brand-marker" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <path d="M6 26C6 14 11 6 16 6s10 8 10 20" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M11 26V13M16 26V10M21 26V13" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+      </div>
       <div class="brand-text">
-        <small>myclaw</small>
-        <h1>Bots</h1>
+        <small>MYCLAW</small>
+        <h1>Control Console</h1>
       </div>
     </div>
-    <div class="toolbar-group">
+    <div class="topbar-meta">
+      <span class="sys-stat"><i class="led ok"></i> SYSTEM ONLINE</span>
       <div class="user-pill" title="u_123" aria-label="Current user">
-        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M20 21a8 8 0 0 0-16 0"/>
           <circle cx="12" cy="8" r="4"/>
         </svg>
+        <span>u_123</span>
       </div>
     </div>
   </header>
 
   <div class="layout">
-    <aside class="sidebar panel">
+    <aside class="sidebar panel" style="--d:1">
       <div class="section-header">
         <div class="section-header-title">
-          <h2>Bot List</h2>
-          <span class="section-header-count" id="bot-count">(0)</span>
+          <span class="marker-label">// REGISTRY</span>
+          <h2>Bots <span class="section-header-count" id="bot-count">(0)</span></h2>
         </div>
         <div class="toolbar-group">
           <button class="icon-btn" onclick="loadBots()" title="Refresh" aria-label="Refresh">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
-              <path d="M21 3v6h-6"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
             </svg>
           </button>
-          <button class="icon-btn" onclick="openCreateBotModal()" title="New Bot" aria-label="New Bot">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <button class="icon-btn accent" onclick="openCreateBotModal()" title="New Bot" aria-label="New Bot">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 5v14"/><path d="M5 12h14"/>
             </svg>
           </button>
@@ -54,42 +63,38 @@
       <div id="bot-list" class="bot-list"></div>
       <div id="bot-empty" class="empty">
         <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="3" width="7" height="7" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/>
-            <rect x="14" y="14" width="7" height="7" rx="1"/>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
         </div>
-        <span class="empty-text">No bots</span>
+        <span class="empty-text">No bots registered</span>
       </div>
     </aside>
 
-    <main class="workspace panel">
-      <div id="workspace-empty" class="empty">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 21a8 8 0 0 0-16 0"/>
-            <circle cx="12" cy="8" r="4"/>
+    <main class="workspace panel" style="--d:2">
+      <div id="workspace-empty" class="empty tall">
+        <div class="empty-icon big">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="8" r="4"/>
           </svg>
         </div>
-        <span class="empty-text">Select a bot</span>
+        <span class="empty-text">Select a bot to inspect</span>
       </div>
 
       <div id="workspace-detail" style="display:none;">
-        <div class="card">
+        <div class="card hero">
           <div class="card-header">
-            <span class="card-title" id="detail-name">-</span>
+            <div class="hero-id">
+              <span class="card-title" id="detail-name">-</span>
+              <span class="hero-sub" id="detail-bot-id">-</span>
+            </div>
             <span id="detail-status-badge"></span>
           </div>
           <div class="info-grid">
             <div class="info-cell">
               <span class="info-cell-label">Channel</span>
               <strong class="info-cell-value" id="detail-channel">-</strong>
-            </div>
-            <div class="info-cell">
-              <span class="info-cell-label">Bot ID</span>
-              <strong class="info-cell-value" id="detail-bot-id">-</strong>
             </div>
             <div class="info-cell">
               <span class="info-cell-label">Account</span>
@@ -99,7 +104,7 @@
         </div>
 
         <div class="card">
-          <span class="card-subtitle">Agent</span>
+          <span class="card-subtitle"><span class="marker-label">// AGENT</span></span>
           <div class="form-grid">
             <div class="form-field wide">
               <label>Capability</label>
@@ -115,18 +120,25 @@
           </div>
         </div>
 
-        <div class="card">
-          <span class="card-subtitle">Webhook</span>
-          <p class="card-hint">Send POST requests to this URL — the bot's agent will process the data automatically</p>
+        <div class="card" id="detail-webhook-card">
+          <span class="card-subtitle"><span class="marker-label">// WEBHOOK</span></span>
+          <p class="card-hint">POST to this endpoint — the bot's agent processes the payload automatically.</p>
           <div class="hook-url-row">
             <code class="hook-url-value" id="detail-hook-url">-</code>
             <button class="btn-secondary" onclick="copyHookUrl()">Copy</button>
           </div>
         </div>
 
-        <div class="card">
-          <span class="card-subtitle">Connect</span>
-          <button class="btn-primary" onclick="connectSelectedBot()">Login / Connect</button>
+        <div class="card" id="detail-connect-card">
+          <span class="card-subtitle"><span class="marker-label">// CONNECT</span></span>
+          <p class="card-hint">Generate a WeChat login QR and link this bot to an account.</p>
+          <button class="btn-primary" onclick="connectSelectedBot()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 20v.01M17 20h3"/>
+            </svg>
+            Login / Connect
+          </button>
           <div id="connect-result"></div>
         </div>
       </div>
@@ -136,16 +148,25 @@
 
 <div class="modal-overlay" id="create-bot-modal">
   <div class="modal">
-    <h3 class="modal-heading">New Bot</h3>
-    <p class="modal-desc">Create a new bot</p>
+    <div class="modal-top">
+      <span class="marker-label">// PROVISION</span>
+      <h3 class="modal-heading">New Bot</h3>
+      <p class="modal-desc">Register a new channel or hook bot.</p>
+    </div>
     <div class="radio-group">
       <label class="radio-item">
         <input type="radio" name="bot-type" value="channel" checked onchange="toggleBotType()">
-        <span>Channel</span>
+        <span class="radio-face">
+          <strong>Channel</strong>
+          <em>WeChat live session</em>
+        </span>
       </label>
       <label class="radio-item">
         <input type="radio" name="bot-type" value="hook" onchange="toggleBotType()">
-        <span>Hook</span>
+        <span class="radio-face">
+          <strong>Hook</strong>
+          <em>Inbound webhook</em>
+        </span>
       </label>
     </div>
     <div class="form-grid">
@@ -169,22 +190,23 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeCreateBotModal()">Close</button>
-      <button class="btn-primary" onclick="createBot()">Create</button>
+      <button class="btn-secondary" onclick="closeCreateBotModal()">Cancel</button>
+      <button class="btn-primary" onclick="createBot()">Create Bot</button>
     </div>
   </div>
 </div>
 
 <div class="modal-overlay" id="qr-modal">
-  <div class="modal">
-    <h3 class="modal-heading">QR Login</h3>
-    <p class="modal-desc" id="qr-status-text">Scan with WeChat</p>
+  <div class="modal qr">
+    <div class="modal-top">
+      <span class="marker-label">// AUTH HANDSHAKE</span>
+      <h3 class="modal-heading">QR Login</h3>
+      <p class="modal-desc" id="qr-status-text">Scan with WeChat</p>
+    </div>
     <div class="qr-box"><img id="qr-image" alt="WeChat QR code" style="display:none;"/></div>
-    <div class="qr-box" id="qr-share-box" style="display:none;">
-      <div class="kv-row"><span class="kv-label">share</span><strong><a id="qr-share-link" target="_blank" rel="noreferrer"></a></strong></div>
-      <div class="modal-footer" style="justify-content:flex-start;margin-top:10px;">
-        <button class="btn-secondary" onclick="copyShareURL()">Copy Link</button>
-      </div>
+    <div class="qr-box ghost" id="qr-share-box" style="display:none;">
+      <div class="kv-row"><span class="kv-label">share</span><a id="qr-share-link" target="_blank" rel="noreferrer"></a></div>
+      <button class="btn-secondary" onclick="copyShareURL()">Copy Link</button>
     </div>
     <div class="modal-footer">
       <button class="btn-danger" onclick="closeQRModal()">Close</button>

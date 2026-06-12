@@ -259,16 +259,27 @@ function renderDetail() {
   if (!bot) {
     stopLoginPolling();
     empty.style.display = 'flex';
+    detail.style.display = 'none';
     return;
   }
   empty.style.display = 'none';
   detail.style.display = 'grid';
+
+  // A WeChat channel bot is the only kind that connects via QR login.
+  const isHook = bot.type === 'hook';
+  const isWeChatChannel = bot.type === 'channel' && bot.channel_type === 'wechat';
+
   document.getElementById('detail-name').textContent = bot.name;
   document.getElementById('detail-status-badge').innerHTML = statusBadge(bot.connection_status);
-  document.getElementById('detail-channel').textContent = bot.channel_type;
+  document.getElementById('detail-channel').textContent = bot.channel_type || (isHook ? 'webhook' : '-');
   document.getElementById('detail-bot-id').textContent = bot.bot_id;
   document.getElementById('detail-account-id').textContent = bot.channel_account_id || '-';
   document.getElementById('detail-hook-url').textContent = hookUrl(bot.name);
+
+  // Only hook bots expose a webhook; only WeChat channel bots expose QR connect.
+  document.getElementById('detail-webhook-card').style.display = isHook ? '' : 'none';
+  document.getElementById('detail-connect-card').style.display = isWeChatChannel ? '' : 'none';
+
   renderSelectedBotAgentControls();
   if (!activeBindingId) {
     document.getElementById('connect-result').innerHTML = '';
