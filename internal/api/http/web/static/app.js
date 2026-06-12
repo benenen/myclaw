@@ -512,7 +512,7 @@ async function sendChatMessage() {
       text: text,
     });
     if (data.code === 'OK' && data.data && data.data.text) {
-      appendChatBubble('bot', data.data.text);
+      appendChatBubble('bot', data.data.text, true);
     } else if (data.code === 'TIMEOUT') {
       appendChatBubble('bot', '⏱ 处理超时，请重试。');
     } else {
@@ -527,13 +527,68 @@ async function sendChatMessage() {
   }
 }
 
-function appendChatBubble(role, text) {
+function appendChatBubble(role, text, markdown) {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = 'chat-bubble ' + role;
-  div.textContent = text;
+  if (markdown) {
+    div.innerHTML = renderMarkdown(text);
+  } else {
+    div.textContent = text;
+  }
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+// ── Lightweight Markdown renderer ─────────────────────────
+
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (_, lang, code) {
+    return '<pre><code class="language-' + escapeHtml(lang) + '">' + code.trim() + '</code></pre>';
+  });
+
+  // Inline code (`...`)
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold (**...**)
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // Italic (*...*)
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // Headers (### ...)
+  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+
+  // Unordered list items (- ... or * ...)
+  html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+
+  // Ordered list items (1. ...)
+  html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+  // Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+
+  // Horizontal rule (--- or ***)
+  html = html.replace(/^(---|\*\*\*)$/gm, '<hr>');
+
+  // Double newlines → paragraph breaks
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  html = html.replace(/<p>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+
+  return html;
 }
 
 // ── Bootstrap ───────────────────────────────────────────
