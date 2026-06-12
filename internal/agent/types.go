@@ -23,6 +23,9 @@ type Spec struct {
 	Env        map[string]string
 	Timeout    time.Duration
 	QueueSize  int
+	// Orchestrator marks a brain session: the orchestrator replies with an
+	// immediate ack and runs the turn detached, pushing the final answer later.
+	Orchestrator bool
 }
 
 type Request struct {
