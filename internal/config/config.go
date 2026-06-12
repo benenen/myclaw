@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const requiredMasterKeyBytes = 32
@@ -14,11 +15,13 @@ const requiredMasterKeyBytes = 32
 var ErrMissingMasterKey = errors.New("CHANNEL_MASTER_KEY is required")
 
 type Config struct {
-	DataDir          string
-	HTTPAddr         string
-	SQLitePath       string
-	LogLevel         string
-	ChannelMasterKey []byte
+	DataDir             string
+	HTTPAddr            string
+	SQLitePath          string
+	LogLevel            string
+	ChannelMasterKey    []byte
+	OrchestratorTimeout time.Duration
+	MCPURL              string
 }
 
 type DataPaths struct {
@@ -74,6 +77,18 @@ func Load() (Config, error) {
 	}
 
 	cfg.ChannelMasterKey = masterKey
+
+	cfg.OrchestratorTimeout = 30 * time.Minute
+	if v := os.Getenv("CHANNEL_ORCHESTRATOR_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse CHANNEL_ORCHESTRATOR_TIMEOUT: %w", err)
+		}
+		cfg.OrchestratorTimeout = d
+	}
+
+	cfg.MCPURL = getEnvOrDefault("CHANNEL_MCP_URL", "http://127.0.0.1"+cfg.HTTPAddr+"/mcp")
+
 	return cfg, nil
 }
 
