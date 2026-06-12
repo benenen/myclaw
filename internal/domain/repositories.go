@@ -35,3 +35,11 @@ type AgentCapabilityRepository interface {
 	GetByKey(ctx context.Context, key string) (AgentCapability, error)
 	List(ctx context.Context) ([]AgentCapability, error)
 }
+
+type RegisteredAgentRepository interface {
+	Upsert(ctx context.Context, agent RegisteredAgent) (RegisteredAgent, error)
+	GetByID(ctx context.Context, id string) (RegisteredAgent, error)
+	GetByName(ctx context.Context, name string) (RegisteredAgent, error)
+	List(ctx context.Context) ([]RegisteredAgent, error)
+	DeleteByID(ctx context.Context, id string) error
+}
