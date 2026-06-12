@@ -51,6 +51,7 @@ type CreateBotInput struct {
 	ExternalUserID    string
 	Name              string
 	Type              string
+	Role              string
 	ChannelType       string
 	AgentCapabilityID string
 	AgentMode         string
@@ -60,6 +61,7 @@ type CreateBotOutput struct {
 	BotID             string
 	Name              string
 	Type              string
+	Role              string
 	ChannelType       string
 	ConnectionStatus  string
 	ChannelAccountID  string
@@ -88,6 +90,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		UserID:            user.ID,
 		Name:              input.Name,
 		Type:              botType,
+		Role:              input.Role,
 		ChannelType:       input.ChannelType,
 		ConnectionStatus:  connectionStatus,
 		AgentCapabilityID: input.AgentCapabilityID,
@@ -100,6 +103,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		BotID:             bot.ID,
 		Name:              bot.Name,
 		Type:              bot.Type,
+		Role:              bot.Role,
 		ChannelType:       bot.ChannelType,
 		ConnectionStatus:  bot.ConnectionStatus,
 		ChannelAccountID:  bot.ChannelAccountID,
@@ -129,6 +133,7 @@ type BotListItem struct {
 	BotID             string
 	Name              string
 	Type              string
+	Role              string
 	ChannelType       string
 	ConnectionStatus  string
 	ChannelAccountID  string
@@ -267,6 +272,7 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 			BotID:             bot.ID,
 			Name:              bot.Name,
 			Type:              bot.Type,
+			Role:              bot.Role,
 			ChannelType:       bot.ChannelType,
 			ConnectionStatus:  bot.ConnectionStatus,
 			ChannelAccountID:  bot.ChannelAccountID,
