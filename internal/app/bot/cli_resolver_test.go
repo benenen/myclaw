@@ -6,11 +6,55 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/benenen/myclaw/internal/domain"
 )
+
+func TestResolveOrchestratorInjectsMCPAndPrompt(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_brain",
+		Name:              "brain-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		Role:              domain.BotRoleOrchestrator,
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Command:        "/usr/local/bin/claude",
+			Args:           []string{"--stream-json"},
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+		Timeout:             time.Minute,
+		OrchestratorTimeout: 25 * time.Minute,
+		MCPURL:              "http://127.0.0.1:8080/mcp",
+		OrchestratorPrompt:  "BRAIN-PROMPT",
+	})
+
+	spec, err := r.Resolve(context.Background(), "bot_brain")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !spec.Orchestrator {
+		t.Fatal("expected Orchestrator=true")
+	}
+	if spec.Timeout != 25*time.Minute {
+		t.Fatalf("expected orchestrator timeout, got %v", spec.Timeout)
+	}
+	joined := strings.Join(spec.Args, " ")
+	if !strings.Contains(joined, "--mcp-config") || !strings.Contains(joined, "/mcp") {
+		t.Fatalf("expected mcp config in args: %v", spec.Args)
+	}
+	if !strings.Contains(joined, "--append-system-prompt") || !strings.Contains(joined, "BRAIN-PROMPT") {
+		t.Fatalf("expected system prompt in args: %v", spec.Args)
+	}
+}
 
 func TestBotCLIResolverResolveReturnsConfigForConfiguredAvailableCapability(t *testing.T) {
 	bots := newBotRepoStub(domain.Bot{

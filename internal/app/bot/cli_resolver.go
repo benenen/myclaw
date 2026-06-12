@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -19,26 +20,35 @@ var (
 )
 
 type BotCLIResolverConfig struct {
-	Timeout       time.Duration
-	WorkspaceRoot string
-	SQLitePath    string
+	Timeout             time.Duration
+	WorkspaceRoot       string
+	SQLitePath          string
+	OrchestratorTimeout time.Duration
+	MCPURL              string
+	OrchestratorPrompt  string
 }
 
 type BotCLIResolver struct {
-	bots          domain.BotRepository
-	capabilities  domain.AgentCapabilityRepository
-	timeout       time.Duration
-	workspaceRoot string
-	sqlitePath    string
+	bots                domain.BotRepository
+	capabilities        domain.AgentCapabilityRepository
+	timeout             time.Duration
+	workspaceRoot       string
+	sqlitePath          string
+	orchestratorTimeout time.Duration
+	mcpURL              string
+	orchestratorPrompt  string
 }
 
 func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapabilityRepository, cfg BotCLIResolverConfig) *BotCLIResolver {
 	return &BotCLIResolver{
-		bots:          bots,
-		capabilities:  capabilities,
-		timeout:       cfg.Timeout,
-		workspaceRoot: cfg.WorkspaceRoot,
-		sqlitePath:    cfg.SQLitePath,
+		bots:                bots,
+		capabilities:        capabilities,
+		timeout:             cfg.Timeout,
+		workspaceRoot:       cfg.WorkspaceRoot,
+		sqlitePath:          cfg.SQLitePath,
+		orchestratorTimeout: cfg.OrchestratorTimeout,
+		mcpURL:              cfg.MCPURL,
+		orchestratorPrompt:  cfg.OrchestratorPrompt,
 	}
 }
 
@@ -81,7 +91,34 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 			return agent.Spec{}, err
 		}
 	}
+	if bot.Role == domain.BotRoleOrchestrator {
+		spec.Orchestrator = true
+		if r.orchestratorTimeout > 0 {
+			spec.Timeout = r.orchestratorTimeout
+		}
+		extra := []string{}
+		if r.mcpURL != "" {
+			extra = append(extra, "--mcp-config", mcpConfigJSON(r.mcpURL))
+		}
+		if r.orchestratorPrompt != "" {
+			extra = append(extra, "--append-system-prompt", r.orchestratorPrompt)
+		}
+		spec.Args = append(spec.Args, extra...)
+	}
 	return spec, nil
+}
+
+func mcpConfigJSON(url string) string {
+	cfg := map[string]any{
+		"mcpServers": map[string]any{
+			"myclaw": map[string]any{
+				"type": "http",
+				"url":  url,
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	return string(data)
 }
 
 func (r *BotCLIResolver) timeoutForMode(mode string) time.Duration {
