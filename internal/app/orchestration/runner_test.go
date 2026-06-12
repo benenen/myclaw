@@ -30,6 +30,8 @@ func (f *fakeExecutor) Send(ctx context.Context, botID string, spec agent.Spec, 
 	return f.resp, f.err
 }
 
+func agentResponse(text string) agent.Response { return agent.Response{Text: text} }
+
 func TestLocalRunnerSendsToBot(t *testing.T) {
 	exec := &fakeExecutor{resp: agent.Response{Text: "done"}}
 	r := NewRunner(NewLocalRunner(fakeResolver{}, exec), nil)
