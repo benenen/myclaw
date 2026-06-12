@@ -143,18 +143,12 @@ function botType() {
 function toggleBotType() {
   const channelField = document.getElementById('create-bot-channel-field');
   const nameInput = document.getElementById('create-bot-name');
-  const channelSelect = document.getElementById('create-bot-channel');
   if (botType() === 'hook') {
     channelField.style.display = 'none';
     nameInput.placeholder = 'e.g. vikunja';
-  } else if (botType() === 'http') {
-    channelField.style.display = 'none';
-    nameInput.placeholder = 'e.g. sales-bot';
-    channelSelect.value = 'http';
   } else {
     channelField.style.display = 'block';
     nameInput.placeholder = 'e.g. sales-bot';
-    channelSelect.value = 'wechat';
   }
 }
 
@@ -177,15 +171,12 @@ async function createBot() {
   const body = {
     user_id: userId,
     name,
-    type: botType() === 'http' ? 'channel' : botType(),
+    type: botType(),
     agent_capability_id: agentCapabilityID || undefined,
     agent_mode: agentMode || undefined,
   };
   if (botType() === 'channel') {
     body.channel_type = channelType;
-  }
-  if (botType() === 'http') {
-    body.channel_type = 'http';
   }
   const data = await api('POST', '/bots/create', body);
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
