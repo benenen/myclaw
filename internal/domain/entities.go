@@ -65,7 +65,22 @@ type Bot struct {
 	ConnectionError   string
 	AgentCapabilityID string
 	AgentMode         string
+	Role              string
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type RegisteredAgent struct {
+	ID            string
+	Name          string
+	Description   string
+	Kind          string
+	BotID         string
+	Endpoint      string
+	AuthToken     string
+	Health        string
+	LastHeartbeat *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
