@@ -15,6 +15,7 @@ import (
 	"github.com/benenen/myclaw/internal/api/http/web"
 	"github.com/benenen/myclaw/internal/app/bot"
 	"github.com/benenen/myclaw/internal/app/capability"
+	"github.com/benenen/myclaw/internal/app/orchestration"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
@@ -67,6 +68,7 @@ func New(cfg config.Config) (*App, error) {
 	bindingRepo := repositories.NewChannelBindingRepository(db)
 	botRepo := repositories.NewBotRepository(db)
 	capabilityRepo := repositories.NewAgentCapabilityRepository(db)
+	registeredAgentRepo := repositories.NewRegisteredAgentRepository(db)
 
 	wechatCfg := wechat.LoadConfig()
 	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
@@ -75,11 +77,19 @@ func New(cfg config.Config) (*App, error) {
 	executor := agent.NewManager()
 	replyGateway := wechat.NewReplyGateway(wechatClient)
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
-		Timeout:       botCLITimeout,
-		WorkspaceRoot: cfg.BotWorkspaceRoot(),
-		SQLitePath:    cfg.SQLitePath,
+		Timeout:             botCLITimeout,
+		WorkspaceRoot:       cfg.BotWorkspaceRoot(),
+		SQLitePath:          cfg.SQLitePath,
+		OrchestratorTimeout: cfg.OrchestratorTimeout,
+		MCPURL:              cfg.MCPURL,
+		OrchestratorPrompt:  orchestration.OrchestratorPrompt(),
 	})
 	orchestrator := bot.NewBotMessageOrchestrator(executor, replyGateway, resolver)
+
+	taskStore := orchestration.NewTaskStore()
+	localRunner := orchestration.NewLocalRunner(resolver, executor)
+	runner := orchestration.NewRunner(localRunner, nil) // remote runner added in M6
+	mcpService := orchestration.NewMCPService(registeredAgentRepo, taskStore, runner)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	hookManager := hook.NewManager(botRepo, resolver, executor)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, provider, cipher, logger, func(ev channel.RuntimeEvent) {
@@ -96,6 +106,9 @@ func New(cfg config.Config) (*App, error) {
 	})
 	mux.Handle("/", web.Handler())
 
+	mux.Handle("/mcp", orchestration.NewMCPHandler(mcpService))
+	mux.Handle("/mcp/", orchestration.NewMCPHandler(mcpService))
+
 	handlers.RegisterRoutes(mux, handlers.Dependencies{
 		BotService:       botSvc,
 		MessageSimulator: messageSimulator,
@@ -104,6 +117,10 @@ func New(cfg config.Config) (*App, error) {
 
 	if _, err := discoverer.Refresh(context.Background()); err != nil {
 		logger.Info("agent capability refresh failed", "error", err)
+	}
+
+	if err := orchestration.SyncLocalAgents(context.Background(), botRepo, registeredAgentRepo); err != nil {
+		logger.Info("local sub-agent registration failed", "error", err)
 	}
 
 	go func() {
