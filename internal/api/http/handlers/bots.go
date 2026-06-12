@@ -163,12 +163,14 @@ func ConnectBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 		}
 
 		httpapi.WriteOKFromRequest(w, r, dto.ConnectBotResponse{
-			BotID:         result.BotID,
-			BindingID:     result.BindingID,
-			Status:        result.Status,
-			QRCodePayload: result.QRCodePayload,
-			QRShareURL:    result.QRShareURL,
-			ExpiresAt:     result.ExpiresAt,
+			BotID:            result.BotID,
+			BindingID:        result.BindingID,
+			Status:           result.Status,
+			QRCodePayload:    result.QRCodePayload,
+			QRShareURL:       result.QRShareURL,
+			ExpiresAt:        result.ExpiresAt,
+			ConnectionStatus: result.ConnectionStatus,
+			ChannelAccountID: result.ChannelAccountID,
 		})
 	}
 }

@@ -104,7 +104,7 @@ func (r *Receiver) RegisterChat(botID, messageID string) (replyCh <-chan agent.R
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := botID + ":" + messageID
-	w := &chatWaiter{replyCh: make(chan agent.Response, 1)}
+	w := &chatWaiter{replyCh: make(chan agent.Response, 5)}
 	r.chatWaiters[key] = w
 	return w.replyCh, func() {
 		r.mu.Lock()
@@ -115,17 +115,17 @@ func (r *Receiver) RegisterChat(botID, messageID string) (replyCh <-chan agent.R
 	}
 }
 
-// DeliverChatReply delivers a reply to a waiting chat session. Returns true
-// if a waiter was found and the reply was delivered.
+// DeliverChatReply delivers a reply to a waiting chat session. The waiter
+// is NOT removed after delivery to allow orchestrator bots to send an ack
+// first and then the real answer — the last reply wins.
 func (r *Receiver) DeliverChatReply(botID, messageID string, resp agent.Response) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
 	key := botID + ":" + messageID
 	w, ok := r.chatWaiters[key]
+	r.mu.RUnlock()
 	if !ok {
 		return false
 	}
-	delete(r.chatWaiters, key)
 	select {
 	case w.replyCh <- resp:
 	default:

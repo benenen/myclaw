@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benenen/myclaw/internal/agent"
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	"github.com/benenen/myclaw/internal/api/http/dto"
 	"github.com/benenen/myclaw/internal/channel/httpchan"
@@ -77,15 +78,36 @@ func ChatWithHttpChannel(receiver *httpchan.Receiver) stdhttp.HandlerFunc {
 			return
 		}
 
-		select {
-		case reply := <-replyCh:
+		deadline := time.After(60 * time.Second)
+		linger := 10 * time.Second
+		var lastReply agent.Response
+		gotReply := false
+
+		// Read all replies; for orchestrator bots we get ack first, then the
+		// real answer. We keep the last one.
+	readLoop:
+		for {
+			timeout := deadline
+			if gotReply {
+				timeout = time.After(linger)
+			}
+			select {
+			case reply := <-replyCh:
+				gotReply = true
+				lastReply = reply
+			case <-timeout:
+				break readLoop
+			}
+		}
+
+		if gotReply && lastReply.Text != "" {
 			httpapi.WriteOKFromRequest(w, r, dto.HttpChannelChatResponse{
 				BotID:     req.BotID,
 				UserID:    "webui",
-				Text:      reply.Text,
+				Text:      lastReply.Text,
 				MessageID: messageID,
 			})
-		case <-time.After(60 * time.Second):
+		} else {
 			httpapi.WriteError(w, r, "TIMEOUT", "bot did not reply within 60 seconds")
 		}
 	}

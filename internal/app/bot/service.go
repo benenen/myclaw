@@ -142,12 +142,14 @@ type BotListItem struct {
 }
 
 type StartBotLoginOutput struct {
-	BotID         string
-	BindingID     string
-	Status        string
-	QRCodePayload string
-	QRShareURL    string
-	ExpiresAt     *time.Time
+	BotID             string
+	BindingID         string
+	Status            string
+	QRCodePayload     string
+	QRShareURL        string
+	ExpiresAt         *time.Time
+	ConnectionStatus  string
+	ChannelAccountID  string
 }
 
 type RefreshBotLoginOutput struct {
@@ -389,6 +391,22 @@ func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (
 	binding.ProviderBindingRef = result.ProviderBindingRef
 	binding.QRCodePayload = result.QRCodePayload
 	binding.ExpiresAt = &result.ExpiresAt
+
+	// Auto-confirm channels (e.g. HTTP) complete the full login flow immediately.
+	if isAutoConfirmChannel(bot.ChannelType) {
+		completed, err := s.confirmAndStartRuntime(ctx, bot, binding, result)
+		if err != nil {
+			return StartBotLoginOutput{}, err
+		}
+		return StartBotLoginOutput{
+			BotID:             completed.BotID,
+			BindingID:         completed.BindingID,
+			Status:            completed.Status,
+			ConnectionStatus:  completed.ConnectionStatus,
+			ChannelAccountID:  completed.ChannelAccountID,
+		}, nil
+	}
+
 	binding, err = s.bindings.Update(ctx, binding)
 	if err != nil {
 		return StartBotLoginOutput{}, err
@@ -400,5 +418,96 @@ func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (
 		QRCodePayload: binding.QRCodePayload,
 		QRShareURL:    result.QRShareURL,
 		ExpiresAt:     binding.ExpiresAt,
+	}, nil
+}
+
+// isAutoConfirmChannel returns true for channel types that auto-confirm
+// without user interaction (no QR scan needed).
+func isAutoConfirmChannel(channelType string) bool {
+	return channelType == "http"
+}
+
+type completedLogin struct {
+	BotID             string
+	BindingID         string
+	Status            string
+	ConnectionStatus  string
+	ChannelAccountID  string
+}
+
+// confirmAndStartRuntime performs the confirm flow (refresh binding, create
+// account, start runtime) for auto-confirm channels.
+func (s *BotService) confirmAndStartRuntime(ctx context.Context, bot domain.Bot, binding domain.ChannelBinding, _ channel.CreateBindingResult) (completedLogin, error) {
+	refreshed, err := s.provider.RefreshBinding(ctx, channel.RefreshBindingRequest{
+		ProviderBindingRef: binding.ProviderBindingRef,
+		ChannelType:        bot.ChannelType,
+	})
+	if err != nil {
+		return completedLogin{}, err
+	}
+	binding.Status = refreshed.ProviderStatus
+	binding.QRCodePayload = refreshed.QRCodePayload
+	if !refreshed.ExpiresAt.IsZero() {
+		binding.ExpiresAt = &refreshed.ExpiresAt
+	}
+	binding.ErrorMessage = refreshed.ErrorMessage
+
+	if refreshed.ProviderStatus != domain.BindingStatusConfirmed {
+		binding, _ = s.bindings.Update(ctx, binding)
+		return completedLogin{BotID: bot.ID, BindingID: binding.ID, Status: binding.Status}, nil
+	}
+
+	now := time.Now().UTC()
+	ciphertext, err := s.cipher.Encrypt(refreshed.CredentialPayload)
+	if err != nil {
+		return completedLogin{}, err
+	}
+	account, err := s.accounts.Upsert(ctx, domain.ChannelAccount{
+		ID:                   domain.NewPrefixedID("acct"),
+		UserID:               bot.UserID,
+		ChannelType:          bot.ChannelType,
+		AccountUID:           refreshed.AccountUID,
+		DisplayName:          refreshed.DisplayName,
+		AvatarURL:            refreshed.AvatarURL,
+		CredentialCiphertext: ciphertext,
+		CredentialVersion:    refreshed.CredentialVersion,
+		LastBoundAt:          &now,
+	})
+	if err != nil {
+		return completedLogin{}, err
+	}
+	binding.ChannelAccountID = account.ID
+	binding.FinishedAt = &now
+	bot.ChannelAccountID = account.ID
+	bot.ConnectionStatus = domain.BotConnectionStatusConnecting
+	bot.ConnectionError = ""
+	if _, err := s.bots.Update(ctx, bot); err != nil {
+		return completedLogin{}, err
+	}
+	if s.runtimes != nil {
+		if err := s.runtimes.Start(ctx, bot.ID); err != nil {
+			if _, updateErr := s.bindings.Update(ctx, binding); updateErr != nil {
+				return completedLogin{}, updateErr
+			}
+			bot.ConnectionStatus = domain.BotConnectionStatusError
+			bot.ConnectionError = err.Error()
+			_, _ = s.bots.Update(ctx, bot)
+			return completedLogin{}, err
+		}
+	}
+	binding, err = s.bindings.Update(ctx, binding)
+	if err != nil {
+		return completedLogin{}, err
+	}
+	bot, err = s.bots.GetByID(ctx, bot.ID)
+	if err != nil {
+		return completedLogin{}, err
+	}
+	return completedLogin{
+		BotID:             bot.ID,
+		BindingID:         binding.ID,
+		Status:            binding.Status,
+		ConnectionStatus:  bot.ConnectionStatus,
+		ChannelAccountID:  bot.ChannelAccountID,
 	}, nil
 }

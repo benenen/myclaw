@@ -67,12 +67,14 @@ type SimulateBotMessageResponse struct {
 }
 
 type ConnectBotResponse struct {
-	BotID         string `json:"bot_id"`
-	BindingID     string `json:"binding_id"`
-	Status        string `json:"status"`
-	QRCodePayload string `json:"qr_code_payload"`
-	QRShareURL    string `json:"qr_share_url"`
-	ExpiresAt     any    `json:"expires_at,omitempty"`
+	BotID             string `json:"bot_id"`
+	BindingID         string `json:"binding_id"`
+	Status            string `json:"status"`
+	QRCodePayload     string `json:"qr_code_payload"`
+	QRShareURL        string `json:"qr_share_url"`
+	ExpiresAt         any    `json:"expires_at,omitempty"`
+	ConnectionStatus  string `json:"connection_status,omitempty"`
+	ChannelAccountID  string `json:"channel_account_id,omitempty"`
 }
 
 type RefreshBotLoginResponse struct {
