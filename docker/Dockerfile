@@ -12,38 +12,45 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /myclaw .
 
 # ------------------------------------------------------------------
 # Tool downloads
+#
+# NOTE: ARGs do not cross build stages, so the version/arch ARGs are
+# (re)declared inside each stage that consumes them. The extracted
+# binary is resolved by glob because these release tarballs unpack to
+# an arch-suffixed name (e.g. codex-x86_64-unknown-linux-musl), not a
+# bare "codex".
 # ------------------------------------------------------------------
+FROM builder AS with-codex
 ARG TARGETARCH
 ARG CODEX_VERSION=rust-v0.137.0
-ARG OPENCODE_VERSION=v1.16.2
-ARG CLAUDE_VERSION=v2.1.168
-
-FROM builder AS with-codex
-RUN \
+RUN set -eux; \
   CODEX_ARCH=$(if [ "$TARGETARCH" = "amd64" ]; then echo "x86_64-unknown-linux-musl"; else echo "aarch64-unknown-linux-musl"; fi); \
-  curl -fsSL "https://github.com/openai/codex/releases/download/${CODEX_VERSION}/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz && \
-  tar -xzf /tmp/codex.tar.gz -C /tmp && \
-  mv /tmp/codex /usr/local/bin/codex && \
-  chmod +x /usr/local/bin/codex && \
-  rm /tmp/codex.tar.gz
+  curl -fsSL "https://github.com/openai/codex/releases/download/${CODEX_VERSION}/codex-${CODEX_ARCH}.tar.gz" -o /tmp/codex.tar.gz; \
+  mkdir -p /tmp/codex-x; tar -xzf /tmp/codex.tar.gz -C /tmp/codex-x; \
+  bin=$(find /tmp/codex-x -type f -name 'codex*' | head -n1); \
+  install -m 0755 "$bin" /usr/local/bin/codex; \
+  rm -rf /tmp/codex.tar.gz /tmp/codex-x
 
 FROM builder AS with-opencode
-RUN \
+ARG TARGETARCH
+ARG OPENCODE_VERSION=v1.16.2
+RUN set -eux; \
   OPENCODE_ARCH=$(if [ "$TARGETARCH" = "amd64" ]; then echo "linux-x64-musl"; else echo "linux-arm64-musl"; fi); \
-  curl -fsSL "https://github.com/sst/opencode/releases/download/${OPENCODE_VERSION}/opencode-${OPENCODE_ARCH}.tar.gz" -o /tmp/opencode.tar.gz && \
-  tar -xzf /tmp/opencode.tar.gz -C /tmp && \
-  mv /tmp/opencode /usr/local/bin/opencode && \
-  chmod +x /usr/local/bin/opencode && \
-  rm /tmp/opencode.tar.gz
+  curl -fsSL "https://github.com/sst/opencode/releases/download/${OPENCODE_VERSION}/opencode-${OPENCODE_ARCH}.tar.gz" -o /tmp/opencode.tar.gz; \
+  mkdir -p /tmp/opencode-x; tar -xzf /tmp/opencode.tar.gz -C /tmp/opencode-x; \
+  bin=$(find /tmp/opencode-x -type f -name 'opencode*' | head -n1); \
+  install -m 0755 "$bin" /usr/local/bin/opencode; \
+  rm -rf /tmp/opencode.tar.gz /tmp/opencode-x
 
 FROM builder AS with-cc
-RUN \
+ARG TARGETARCH
+ARG CLAUDE_VERSION=v2.1.168
+RUN set -eux; \
   CLAUDE_ARCH=$(if [ "$TARGETARCH" = "amd64" ]; then echo "linux-x64-musl"; else echo "linux-arm64-musl"; fi); \
-  curl -fsSL "https://github.com/anthropics/claude-code/releases/download/${CLAUDE_VERSION}/claude-${CLAUDE_ARCH}.tar.gz" -o /tmp/claude.tar.gz && \
-  tar -xzf /tmp/claude.tar.gz -C /tmp && \
-  mv /tmp/claude /usr/local/bin/claude && \
-  chmod +x /usr/local/bin/claude && \
-  rm /tmp/claude.tar.gz
+  curl -fsSL "https://github.com/anthropics/claude-code/releases/download/${CLAUDE_VERSION}/claude-${CLAUDE_ARCH}.tar.gz" -o /tmp/claude.tar.gz; \
+  mkdir -p /tmp/claude-x; tar -xzf /tmp/claude.tar.gz -C /tmp/claude-x; \
+  bin=$(find /tmp/claude-x -type f -name 'claude*' | head -n1); \
+  install -m 0755 "$bin" /usr/local/bin/claude; \
+  rm -rf /tmp/claude.tar.gz /tmp/claude-x
 
 # ------------------------------------------------------------------
 # Runtime base
