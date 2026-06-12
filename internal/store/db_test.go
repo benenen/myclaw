@@ -12,7 +12,7 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"users", "channel_accounts", "channel_bindings", "bots", "agent_capabilities"} {
+	for _, table := range []string{"users", "channel_accounts", "channel_bindings", "bots", "agent_capabilities", "registered_agents"} {
 		var count int64
 		err := db.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&count).Error
 		if err != nil {
@@ -27,7 +27,7 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if version != 3 {
+	if version != 4 {
 		t.Fatalf("unexpected schema version: %d", version)
 	}
 	if dirty {
@@ -52,7 +52,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if version != 3 {
+	if version != 4 {
 		t.Fatalf("unexpected schema version: %d", version)
 	}
 	if dirty {
