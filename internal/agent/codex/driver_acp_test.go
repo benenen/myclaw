@@ -103,6 +103,117 @@ func TestACPRuntimeRunUsesCodexAppServerProtocol(t *testing.T) {
 	if !strings.Contains(string(logData), `"text":"first"`) || !strings.Contains(string(logData), `"text":"second"`) {
 		t.Fatalf("log missing prompt texts: %s", string(logData))
 	}
+
+	// The thread id created by thread/start (thread-1) must be surfaced on every
+	// completed turn so the orchestrator can persist it for later resume.
+	if first.SessionID != "thread-1" {
+		t.Fatalf("first Run() SessionID = %q, want thread-1", first.SessionID)
+	}
+	if second.SessionID != "thread-1" {
+		t.Fatalf("second Run() SessionID = %q, want thread-1", second.SessionID)
+	}
+}
+
+func TestACPRuntimeResumesThreadWhenResumeSessionSet(t *testing.T) {
+	workDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acp-resume.log")
+
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessCodexACP", "--", "acp-success"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         logPath,
+		},
+		WorkDir:         workDir,
+		Timeout:         2 * time.Second,
+		ResumeSessionID: "thr_prior",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runtime.Close()
+	})
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "again", WorkDir: workDir})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "reply:again" {
+		t.Fatalf("Run() text = %q", resp.Text)
+	}
+	// The fake echoes the resumed thread id back, so the captured session id is
+	// the prior id we asked to resume.
+	if resp.SessionID != "thr_prior" {
+		t.Fatalf("Run() SessionID = %q, want thr_prior", resp.SessionID)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if got := countACPMethod(lines, "thread/resume"); got != 1 {
+		t.Fatalf("thread/resume count = %d, want 1", got)
+	}
+	if got := countACPMethod(lines, "thread/start"); got != 0 {
+		t.Fatalf("thread/start count = %d, want 0 (resume should skip start)", got)
+	}
+	if !strings.Contains(string(logData), `"threadId":"thr_prior"`) {
+		t.Fatalf("log missing resumed thread id: %s", string(logData))
+	}
+}
+
+func TestACPRuntimeFallsBackToStartWhenResumeRejected(t *testing.T) {
+	workDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acp-resume-reject.log")
+
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessCodexACP", "--", "acp-reject-resume"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         logPath,
+		},
+		WorkDir:         workDir,
+		Timeout:         2 * time.Second,
+		ResumeSessionID: "thr_gone",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runtime.Close()
+	})
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "recover", WorkDir: workDir})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "reply:recover" {
+		t.Fatalf("Run() text = %q", resp.Text)
+	}
+	// Resume was rejected; the driver must start fresh and surface that new id.
+	if resp.SessionID != "thread-1" {
+		t.Fatalf("Run() SessionID = %q, want thread-1 (fresh start after rejected resume)", resp.SessionID)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if got := countACPMethod(lines, "thread/resume"); got != 1 {
+		t.Fatalf("thread/resume count = %d, want 1", got)
+	}
+	if got := countACPMethod(lines, "thread/start"); got != 1 {
+		t.Fatalf("thread/start count = %d, want 1 (fallback after rejected resume)", got)
+	}
 }
 
 func countACPMethod(lines []string, method string) int {
@@ -127,7 +238,7 @@ func TestHelperProcessCodexACP(t *testing.T) {
 			mode = args[i+1]
 		}
 	}
-	if mode != "acp-success" {
+	if mode != "acp-success" && mode != "acp-reject-resume" {
 		os.Exit(2)
 	}
 
@@ -175,6 +286,25 @@ func TestHelperProcessCodexACP(t *testing.T) {
 				fmt.Fprintln(os.Stderr, "initialized should be notification")
 				os.Exit(5)
 			}
+		case "thread/resume":
+			if mode == "acp-reject-resume" {
+				// Simulate a server that no longer knows the prior thread id.
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32602, "message": "unknown thread id"},
+				})
+				continue
+			}
+			params, _ := msg["params"].(map[string]any)
+			threadID, _ = params["threadId"].(string)
+			writeACPJSON(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"thread": map[string]any{"id": threadID},
+				},
+			})
 		case "thread/start":
 			threadCount++
 			threadID = fmt.Sprintf("thread-%d", threadCount)
