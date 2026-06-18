@@ -31,11 +31,13 @@ type InboundMessage struct {
 }
 
 // SendParams describes an outbound text message. A non-empty ReplyMessageID
-// makes it a reply threaded under the original message.
+// makes it a reply threaded under the original message. Mentions holds
+// open_ids that should be @-mentioned in the message (group replies only).
 type SendParams struct {
 	ChatID         string
 	Text           string
 	ReplyMessageID string
+	Mentions       []string
 }
 
 // feishuAPI abstracts the Feishu REST surface so provider/reply logic can be

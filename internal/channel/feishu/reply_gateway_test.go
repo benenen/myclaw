@@ -12,7 +12,7 @@ func p2pTarget() channel.ReplyTarget {
 	return channel.ReplyTarget{
 		ChannelType: ChannelType,
 		RecipientID: "oc_1",
-		Metadata:    map[string]string{"bot_id": "bot1", "chat_id": "oc_1", "chat_type": "p2p", "message_id": "om_1"},
+		Metadata:    map[string]string{"bot_id": "bot1", "chat_id": "oc_1", "chat_type": "p2p", "message_id": "om_1", "sender_open_id": "ou_user"},
 	}
 }
 
@@ -20,7 +20,7 @@ func groupTarget() channel.ReplyTarget {
 	return channel.ReplyTarget{
 		ChannelType: ChannelType,
 		RecipientID: "oc_2",
-		Metadata:    map[string]string{"bot_id": "bot1", "chat_id": "oc_2", "chat_type": "group", "message_id": "om_2"},
+		Metadata:    map[string]string{"bot_id": "bot1", "chat_id": "oc_2", "chat_type": "group", "message_id": "om_2", "sender_open_id": "ou_user"},
 	}
 }
 
@@ -42,6 +42,9 @@ func TestReplyP2PSendsToChatNoReplyID(t *testing.T) {
 	if api.sent[0].creds.AppID != "cli_x" {
 		t.Fatalf("creds = %#v", api.sent[0].creds)
 	}
+	if len(api.sent[0].params.Mentions) != 0 {
+		t.Fatalf("p2p reply must not mention, got Mentions = %v", api.sent[0].params.Mentions)
+	}
 }
 
 func TestReplyGroupRepliesToMessage(t *testing.T) {
@@ -55,6 +58,9 @@ func TestReplyGroupRepliesToMessage(t *testing.T) {
 	}
 	if api.sent[0].params.ReplyMessageID != "om_2" || api.sent[0].params.ChatID != "oc_2" {
 		t.Fatalf("params = %#v", api.sent[0].params)
+	}
+	if len(api.sent[0].params.Mentions) != 1 || api.sent[0].params.Mentions[0] != "ou_user" {
+		t.Fatalf("group reply must @mention sender, got Mentions = %v", api.sent[0].params.Mentions)
 	}
 }
 

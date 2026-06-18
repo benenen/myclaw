@@ -55,6 +55,9 @@ func TestRuntimeP2PMessageEmitsEvent(t *testing.T) {
 		if ev.ReplyTarget.MetadataValue("bot_id") != "bot1" {
 			t.Fatalf("bot_id metadata = %q", ev.ReplyTarget.MetadataValue("bot_id"))
 		}
+		if ev.ReplyTarget.MetadataValue("sender_open_id") != "ou_user" {
+			t.Fatalf("sender_open_id metadata = %q", ev.ReplyTarget.MetadataValue("sender_open_id"))
+		}
 	case <-time.After(time.Second):
 		t.Fatal("expected p2p event")
 	}
@@ -82,6 +85,9 @@ func TestRuntimeGroupWithMentionEmitsEventWithReplyID(t *testing.T) {
 	case ev := <-events:
 		if ev.ReplyTarget.MetadataValue("message_id") != "om_3" || ev.ReplyTarget.MetadataValue("chat_type") != "group" {
 			t.Fatalf("reply metadata = %#v", ev.ReplyTarget.Metadata)
+		}
+		if ev.ReplyTarget.MetadataValue("sender_open_id") != "ou_user" {
+			t.Fatalf("sender_open_id metadata = %q", ev.ReplyTarget.MetadataValue("sender_open_id"))
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected group @ event")

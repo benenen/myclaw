@@ -38,6 +38,9 @@ func (g *ReplyGateway) Reply(ctx context.Context, target channel.ReplyTarget, re
 	params := SendParams{ChatID: chatID, Text: text}
 	if target.MetadataValue("chat_type") == "group" {
 		params.ReplyMessageID = strings.TrimSpace(target.MetadataValue("message_id"))
+		if senderOpenID := strings.TrimSpace(target.MetadataValue("sender_open_id")); senderOpenID != "" {
+			params.Mentions = []string{senderOpenID}
+		}
 	}
 	if err := g.api.SendText(ctx, creds, params); err != nil {
 		return fmt.Errorf("feishu reply: %w", err)

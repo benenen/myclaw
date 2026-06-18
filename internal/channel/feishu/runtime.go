@@ -42,10 +42,11 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 				ChannelType: req.ChannelType,
 				RecipientID: msg.ChatID,
 				Metadata: map[string]string{
-					"bot_id":     req.BotID,
-					"chat_id":    msg.ChatID,
-					"chat_type":  msg.ChatType,
-					"message_id": msg.MessageID,
+					"bot_id":         req.BotID,
+					"chat_id":        msg.ChatID,
+					"chat_type":      msg.ChatType,
+					"message_id":     msg.MessageID,
+					"sender_open_id": msg.SenderOpenID,
 				},
 			},
 		})

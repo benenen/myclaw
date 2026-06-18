@@ -106,9 +106,24 @@ func (a *apiClient) botInfo(ctx context.Context, token string) (AppInfo, error) 
 	return AppInfo{AppName: out.Bot.AppName, BotOpenID: out.Bot.OpenID}, nil
 }
 
+// buildTextContent constructs the JSON content string for a text message.
+// When p.Mentions is non-empty each open_id is prepended as an @-mention tag
+// using the SDK builder so the final text is "​<at user_id="id"></at> … body".
+func buildTextContent(p SendParams) string {
+	b := larkim.NewTextMsgBuilder()
+	for _, openID := range p.Mentions {
+		b.AtUser(openID, "")
+	}
+	if len(p.Mentions) > 0 {
+		b.Text(" ")
+	}
+	b.Text(p.Text)
+	return b.Build()
+}
+
 func (a *apiClient) SendText(ctx context.Context, creds Credentials, p SendParams) error {
 	client := a.larkClient(creds.AppID, creds.AppSecret)
-	content := larkim.NewTextMsgBuilder().Text(p.Text).Build()
+	content := buildTextContent(p)
 
 	if p.ReplyMessageID != "" {
 		resp, err := client.Im.V1.Message.Reply(ctx, larkim.NewReplyMessageReqBuilder().
