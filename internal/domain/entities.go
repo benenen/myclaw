@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type User struct {
 	ID             string
@@ -71,6 +74,19 @@ type Bot struct {
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type BotCLISession struct {
+	BotID     string
+	CLIType   string
+	SessionID string
+	WorkDir   string
+	UpdatedAt time.Time
+}
+
+type BotCLISessionRepository interface {
+	Upsert(ctx context.Context, s BotCLISession) error
+	Get(ctx context.Context, botID, cliType string) (BotCLISession, error)
 }
 
 type RegisteredAgent struct {
