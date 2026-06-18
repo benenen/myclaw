@@ -148,7 +148,14 @@ func ConnectBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 			return
 		}
 
-		result, err := svc.StartLogin(r.Context(), botapp.StartBotLoginInput{BotID: req.BotID})
+		input := botapp.StartBotLoginInput{BotID: req.BotID}
+		if req.AppID != "" || req.AppSecret != "" {
+			input.Config = map[string]string{
+				"app_id":     req.AppID,
+				"app_secret": req.AppSecret,
+			}
+		}
+		result, err := svc.StartLogin(r.Context(), input)
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
 				httpapi.WriteError(w, r, "INVALID_ARGUMENT", err.Error())

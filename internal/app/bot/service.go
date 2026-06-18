@@ -113,7 +113,8 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 }
 
 type StartBotLoginInput struct {
-	BotID string
+	BotID  string
+	Config map[string]string
 }
 
 func (s *BotService) DeleteBot(ctx context.Context, botID string) error {
@@ -378,6 +379,7 @@ func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (
 	result, err := s.provider.CreateBinding(ctx, channel.CreateBindingRequest{
 		BindingID:   bindingID,
 		ChannelType: bot.ChannelType,
+		Config:      input.Config,
 	})
 	if err != nil {
 		binding.Status = domain.BindingStatusFailed
@@ -394,7 +396,7 @@ func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (
 
 	// Auto-confirm channels (e.g. HTTP) complete the full login flow immediately.
 	if isAutoConfirmChannel(bot.ChannelType) {
-		completed, err := s.confirmAndStartRuntime(ctx, bot, binding, result)
+		completed, err := s.confirmAndStartRuntime(ctx, bot, binding, result, input.Config)
 		if err != nil {
 			return StartBotLoginOutput{}, err
 		}
@@ -424,7 +426,7 @@ func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (
 // isAutoConfirmChannel returns true for channel types that auto-confirm
 // without user interaction (no QR scan needed).
 func isAutoConfirmChannel(channelType string) bool {
-	return channelType == "http"
+	return channelType == "http" || channelType == "feishu"
 }
 
 type completedLogin struct {
@@ -437,10 +439,11 @@ type completedLogin struct {
 
 // confirmAndStartRuntime performs the confirm flow (refresh binding, create
 // account, start runtime) for auto-confirm channels.
-func (s *BotService) confirmAndStartRuntime(ctx context.Context, bot domain.Bot, binding domain.ChannelBinding, _ channel.CreateBindingResult) (completedLogin, error) {
+func (s *BotService) confirmAndStartRuntime(ctx context.Context, bot domain.Bot, binding domain.ChannelBinding, _ channel.CreateBindingResult, config map[string]string) (completedLogin, error) {
 	refreshed, err := s.provider.RefreshBinding(ctx, channel.RefreshBindingRequest{
 		ProviderBindingRef: binding.ProviderBindingRef,
 		ChannelType:        bot.ChannelType,
+		Config:             config,
 	})
 	if err != nil {
 		return completedLogin{}, err

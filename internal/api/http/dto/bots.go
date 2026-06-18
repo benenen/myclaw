@@ -43,7 +43,9 @@ type ConfigureBotAgentRequest struct {
 type ConfigureBotAgentResponse = BotResponse
 
 type ConnectBotRequest struct {
-	BotID string `json:"bot_id"`
+	BotID     string `json:"bot_id"`
+	AppID     string `json:"app_id,omitempty"`
+	AppSecret string `json:"app_secret,omitempty"`
 }
 
 type DeleteBotRequest struct {

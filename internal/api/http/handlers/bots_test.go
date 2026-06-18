@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	stdhttp "net/http"
 	"testing"
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	"github.com/benenen/myclaw/internal/app/bot"
+	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/security"
 	"github.com/benenen/myclaw/internal/store/repositories"
@@ -229,4 +231,75 @@ func TestDeleteBotHandlerRejectsEmptyBody(t *testing.T) {
 	ts := newTestServer(t)
 	rr := testutil.PostJSON(t, ts, "/api/v1/bots/delete", `{}`)
 	testutil.AssertJSONCode(t, rr, "INVALID_ARGUMENT")
+}
+
+type connectConfigRecorder struct {
+	refreshConfig map[string]string
+}
+
+func (p *connectConfigRecorder) CreateBinding(_ context.Context, req channel.CreateBindingRequest) (channel.CreateBindingResult, error) {
+	return channel.CreateBindingResult{ProviderBindingRef: req.BindingID}, nil
+}
+func (p *connectConfigRecorder) RefreshBinding(_ context.Context, req channel.RefreshBindingRequest) (channel.RefreshBindingResult, error) {
+	p.refreshConfig = req.Config
+	return channel.RefreshBindingResult{ProviderStatus: "confirmed", AccountUID: req.Config["app_id"], CredentialPayload: []byte(`{"app_id":"cli_x"}`), CredentialVersion: 1}, nil
+}
+func (p *connectConfigRecorder) BuildRuntimeConfig(_ context.Context, _ channel.BuildRuntimeConfigRequest) (channel.RuntimeConfig, error) {
+	return channel.RuntimeConfig{}, nil
+}
+func (p *connectConfigRecorder) StartRuntime(_ context.Context, req channel.StartRuntimeRequest) (channel.RuntimeHandle, error) {
+	if req.Callbacks.OnState != nil {
+		req.Callbacks.OnState(channel.RuntimeStateEvent{BotID: req.BotID, ChannelType: req.ChannelType, State: channel.RuntimeStateConnected})
+	}
+	return connectStubHandle{done: make(chan struct{})}, nil
+}
+
+type connectStubHandle struct{ done chan struct{} }
+
+func (h connectStubHandle) Stop()                 {}
+func (h connectStubHandle) Done() <-chan struct{} { return h.done }
+
+// newTestServerWithCustomProvider mirrors newTestServerWithProvider but lets
+// the test inject any channel.Provider.
+func newTestServerWithCustomProvider(t *testing.T, provider channel.Provider) stdhttp.Handler {
+	t.Helper()
+	db := testutil.OpenTestDB(t)
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	cipher, _ := security.NewCipher(key)
+	userRepo := repositories.NewUserRepository(db)
+	bindingRepo := repositories.NewChannelBindingRepository(db)
+	accountRepo := repositories.NewChannelAccountRepository(db)
+	botRepo := repositories.NewBotRepository(db)
+	starter, _ := provider.(channel.RuntimeStarter)
+	mux := stdhttp.NewServeMux()
+	RegisterRoutes(mux, Dependencies{
+		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, starter, cipher, nil)),
+	})
+	return mux
+}
+
+func TestConnectBotPassesFeishuCredentials(t *testing.T) {
+	provider := &connectConfigRecorder{}
+	ts := newTestServerWithCustomProvider(t, provider)
+
+	createRes := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_1","name":"feishu-bot","type":"channel","channel_type":"feishu"}`)
+	if createRes.Code != stdhttp.StatusOK {
+		t.Fatalf("create status = %d body=%s", createRes.Code, createRes.Body.String())
+	}
+	var createEnv httpapi.Envelope
+	if err := json.Unmarshal(createRes.Body.Bytes(), &createEnv); err != nil {
+		t.Fatal(err)
+	}
+	botID := createEnv.Data.(map[string]any)["bot_id"].(string)
+
+	connRes := testutil.PostJSON(t, ts, "/api/v1/bots/connect", `{"bot_id":"`+botID+`","app_id":"cli_x","app_secret":"secret"}`)
+	if connRes.Code != stdhttp.StatusOK {
+		t.Fatalf("connect status = %d body=%s", connRes.Code, connRes.Body.String())
+	}
+	if provider.refreshConfig["app_id"] != "cli_x" || provider.refreshConfig["app_secret"] != "secret" {
+		t.Fatalf("provider did not receive creds: %#v", provider.refreshConfig)
+	}
 }

@@ -269,6 +269,7 @@ function renderDetail() {
   const isHook = bot.type === 'hook';
   const isWeChatChannel = bot.type === 'channel' && bot.channel_type === 'wechat';
   const isHttpChannel = bot.type === 'channel' && bot.channel_type === 'http';
+  const isFeishuChannel = bot.type === 'channel' && bot.channel_type === 'feishu';
 
   document.getElementById('detail-name').textContent = bot.name;
   document.getElementById('detail-status-badge').innerHTML = statusBadge(bot.connection_status);
@@ -284,14 +285,17 @@ function renderDetail() {
     document.getElementById('detail-http-channel-url').textContent = httpChannelUrl();
   }
 
-  // Connect card: WeChat (QR) and HTTP (auto-confirm)
-  const showConnect = isWeChatChannel || isHttpChannel;
+  // Connect card: WeChat (QR), HTTP (auto-confirm), and Feishu (auto-confirm)
+  const showConnect = isWeChatChannel || isHttpChannel || isFeishuChannel;
   const connected = bot.connection_status === 'connected';
   document.getElementById('detail-connect-card').style.display = (showConnect && !connected) ? '' : 'none';
+  document.getElementById('detail-feishu-fields').style.display = isFeishuChannel ? '' : 'none';
   if (isHttpChannel) {
     document.getElementById('detail-connect-hint').textContent = 'Connect this bot to start chatting.';
   } else if (isWeChatChannel) {
     document.getElementById('detail-connect-hint').textContent = 'Generate a WeChat login QR and link this bot to an account.';
+  } else if (isFeishuChannel) {
+    document.getElementById('detail-connect-hint').textContent = 'Enter your Feishu self-built app credentials (App ID + App Secret) to connect.';
   }
 
   // Chat card: HTTP bot only, when connected (runtime active)
@@ -364,14 +368,22 @@ function startLoginPolling(bindingID) {
 async function connectSelectedBot() {
   if (!selectedBotId) { toast('select a bot'); return; }
   const bot = selectedBot();
-  const data = await api('POST', '/bots/connect', { bot_id: selectedBotId });
+  const body = { bot_id: selectedBotId };
+  if (bot && bot.channel_type === 'feishu') {
+    const appId = document.getElementById('feishu-app-id').value.trim();
+    const appSecret = document.getElementById('feishu-app-secret').value.trim();
+    if (!appId || !appSecret) { toast('app_id and app_secret required'); return; }
+    body.app_id = appId;
+    body.app_secret = appSecret;
+  }
+  const data = await api('POST', '/bots/connect', body);
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const result = data.data;
   activeBindingId = result.binding_id;
-  document.getElementById('connect-result').innerHTML = '';
+  document.getElementById('connect-result').replaceChildren();
 
-  // HTTP channel auto-confirms — reload immediately to show the chat dialog.
-  if (bot && bot.type === 'channel' && bot.channel_type === 'http') {
+  // HTTP and Feishu channels auto-confirm — reload immediately.
+  if (bot && bot.type === 'channel' && (bot.channel_type === 'http' || bot.channel_type === 'feishu')) {
     await loadBots();
     return;
   }

@@ -692,6 +692,66 @@ func TestBotServiceRefreshLoginFailsForMissingBinding(t *testing.T) {
 	}
 }
 
+type configRecordingProvider struct {
+	refreshConfig map[string]string
+}
+
+func (p *configRecordingProvider) CreateBinding(_ context.Context, req channel.CreateBindingRequest) (channel.CreateBindingResult, error) {
+	return channel.CreateBindingResult{ProviderBindingRef: req.BindingID}, nil
+}
+
+func (p *configRecordingProvider) RefreshBinding(_ context.Context, req channel.RefreshBindingRequest) (channel.RefreshBindingResult, error) {
+	p.refreshConfig = req.Config
+	return channel.RefreshBindingResult{
+		ProviderStatus:    "confirmed",
+		AccountUID:        req.Config["app_id"],
+		DisplayName:       "Feishu App",
+		CredentialPayload: []byte(`{"app_id":"cli_x","app_secret":"s"}`),
+		CredentialVersion: 1,
+	}, nil
+}
+
+func (p *configRecordingProvider) BuildRuntimeConfig(_ context.Context, _ channel.BuildRuntimeConfigRequest) (channel.RuntimeConfig, error) {
+	return channel.RuntimeConfig{}, nil
+}
+
+func (p *configRecordingProvider) StartRuntime(_ context.Context, req channel.StartRuntimeRequest) (channel.RuntimeHandle, error) {
+	if req.Callbacks.OnState != nil {
+		req.Callbacks.OnState(channel.RuntimeStateEvent{BotID: req.BotID, ChannelType: req.ChannelType, State: channel.RuntimeStateConnected})
+	}
+	return &recordingHandle{done: make(chan struct{})}, nil
+}
+
+type recordingHandle struct{ done chan struct{} }
+
+func (h *recordingHandle) Stop()                 { close(h.done) }
+func (h *recordingHandle) Done() <-chan struct{} { return h.done }
+
+func TestStartLoginThreadsConfigForAutoConfirmChannel(t *testing.T) {
+	provider := &configRecordingProvider{}
+	svc := newTestBotServiceWithProvider(t, provider)
+	ctx := context.Background()
+
+	created, err := svc.CreateBot(ctx, CreateBotInput{ExternalUserID: "u1", Name: "feishu-bot", Type: domain.BotTypeChannel, ChannelType: "feishu"})
+	if err != nil {
+		t.Fatalf("CreateBot: %v", err)
+	}
+
+	out, err := svc.StartLogin(ctx, StartBotLoginInput{
+		BotID:  created.BotID,
+		Config: map[string]string{"app_id": "cli_x", "app_secret": "s"},
+	})
+	if err != nil {
+		t.Fatalf("StartLogin: %v", err)
+	}
+	if out.Status != "confirmed" {
+		t.Fatalf("status = %q, want confirmed", out.Status)
+	}
+	if provider.refreshConfig["app_id"] != "cli_x" || provider.refreshConfig["app_secret"] != "s" {
+		t.Fatalf("RefreshBinding did not receive config, got %#v", provider.refreshConfig)
+	}
+}
+
 func TestBotServiceRefreshLoginMarksBotErrorOnProviderFailure(t *testing.T) {
 	svc := newTestBotService(t)
 	bot, err := svc.CreateBot(context.Background(), CreateBotInput{

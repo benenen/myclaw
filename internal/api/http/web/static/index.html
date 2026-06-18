@@ -141,6 +141,16 @@
         <div class="card" id="detail-connect-card">
           <span class="card-subtitle"><span class="marker-label">// CONNECT</span></span>
           <p class="card-hint" id="detail-connect-hint">Generate a WeChat login QR and link this bot to an account.</p>
+          <div id="detail-feishu-fields" style="display:none;">
+            <div class="form-field wide">
+              <label>App ID</label>
+              <input id="feishu-app-id" type="text" placeholder="cli_xxx">
+            </div>
+            <div class="form-field wide">
+              <label>App Secret</label>
+              <input id="feishu-app-secret" type="password" placeholder="app secret">
+            </div>
+          </div>
           <button class="btn-primary" onclick="connectSelectedBot()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -203,6 +213,7 @@
         <select id="create-bot-channel">
           <option value="wechat">wechat</option>
           <option value="http">http</option>
+          <option value="feishu">feishu</option>
         </select>
       </div>
       <div class="form-field wide">
