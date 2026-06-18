@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/benenen/myclaw/internal/agent"
@@ -67,23 +68,31 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		}
 		return agent.Spec{}, err
 	}
-	if !capability.Available {
-		return agent.Spec{}, ErrBotCLIUnavailable
-	}
+	alias := strings.TrimSpace(bot.CLIAlias)
 	if !slices.Contains(capability.SupportedModes, bot.AgentMode) {
 		return agent.Spec{}, ErrBotCLIUnsupportedMode
 	}
-	if capability.Command == "" {
-		return agent.Spec{}, ErrBotCLIConfigMissing
+	if alias == "" {
+		if !capability.Available {
+			return agent.Spec{}, ErrBotCLIUnavailable
+		}
+		if capability.Command == "" {
+			return agent.Spec{}, ErrBotCLIConfigMissing
+		}
+	}
+	command := capability.Command
+	if alias != "" {
+		command = alias
 	}
 	spec := agent.Spec{
 		BotID:      botID,
 		BotName:    bot.Name,
 		Type:       bot.AgentMode,
-		Command:    capability.Command,
+		Command:    command,
 		Args:       append([]string(nil), capability.Args...),
 		Timeout:    r.timeoutForMode(bot.AgentMode),
 		SQLitePath: r.sqlitePath,
+		RealCLI:    alias != "",
 	}
 	if r.workspaceRoot != "" {
 		spec.WorkDir = filepath.Join(r.workspaceRoot, botID, "workspace")

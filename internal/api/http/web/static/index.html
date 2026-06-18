@@ -114,6 +114,10 @@
               <label>Mode</label>
               <select id="detail-agent-mode"></select>
             </div>
+            <div class="form-field wide">
+              <label>CLI alias <span style="opacity:.6">(optional)</span></label>
+              <input id="detail-agent-alias" type="text" placeholder="e.g. cx">
+            </div>
             <div class="form-field action">
               <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
             </div>
@@ -192,7 +196,7 @@
         <input type="radio" name="bot-type" value="channel" checked onchange="toggleBotType()">
         <span class="radio-face">
           <strong>Channel</strong>
-          <em>WeChat live session</em>
+          <em>Live channel session</em>
         </span>
       </label>
       <label class="radio-item">

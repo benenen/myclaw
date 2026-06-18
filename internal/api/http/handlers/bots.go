@@ -86,6 +86,7 @@ func ListBots(svc *botapp.BotService) stdhttp.HandlerFunc {
 				ChannelAccountID:  item.ChannelAccountID,
 				AgentCapabilityID: item.AgentCapabilityID,
 				AgentMode:         item.AgentMode,
+				CLIAlias:          item.CLIAlias,
 			})
 		}
 		httpapi.WriteOKFromRequest(w, r, resp)
@@ -108,6 +109,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			BotID:             req.BotID,
 			AgentCapabilityID: req.AgentCapabilityID,
 			AgentMode:         req.AgentMode,
+			CLIAlias:          req.CLIAlias,
 		})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
@@ -132,6 +134,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			AgentCapabilityID: result.AgentCapabilityID,
 			AgentMode:         result.AgentMode,
 			Role:              result.Role,
+			CLIAlias:          result.CLIAlias,
 		})
 	}
 }

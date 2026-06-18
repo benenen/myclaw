@@ -90,7 +90,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		return nil, fmt.Errorf("claude acp driver requires command")
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args)...)
+	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args, spec.RealCLI)...)
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -355,8 +355,8 @@ func isClaudeCommand(command string) bool {
 // buildACPArgs assembles the flags required for a persistent stream-json
 // session, appending any operator-supplied args. The required flags are only
 // injected for the real claude binary so test stubs receive their args verbatim.
-func buildACPArgs(command string, extra []string) []string {
-	if !isClaudeCommand(command) {
+func buildACPArgs(command string, extra []string, realCLI bool) []string {
+	if !isClaudeCommand(command) && !realCLI {
 		return append([]string(nil), extra...)
 	}
 	args := []string{

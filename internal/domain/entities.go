@@ -66,6 +66,7 @@ type Bot struct {
 	AgentCapabilityID string
 	AgentMode         string
 	Role              string
+	CLIAlias          string
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time

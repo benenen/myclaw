@@ -26,6 +26,10 @@ type Spec struct {
 	// Orchestrator marks a brain session: the orchestrator replies with an
 	// immediate ack and runs the turn detached, pushing the final answer later.
 	Orchestrator bool
+	// RealCLI marks the command as the genuine target CLI even when its
+	// basename isn't the canonical name (e.g. an operator alias like "cx"
+	// for codex), so drivers still inject real-binary args.
+	RealCLI bool
 }
 
 type Request struct {

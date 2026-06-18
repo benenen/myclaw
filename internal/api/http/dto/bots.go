@@ -32,12 +32,14 @@ type BotResponse struct {
 	ChannelAccountID  string `json:"channel_account_id,omitempty"`
 	AgentCapabilityID string `json:"agent_capability_id,omitempty"`
 	AgentMode         string `json:"agent_mode,omitempty"`
+	CLIAlias          string `json:"cli_alias,omitempty"`
 }
 
 type ConfigureBotAgentRequest struct {
 	BotID             string `json:"bot_id"`
 	AgentCapabilityID string `json:"agent_capability_id"`
 	AgentMode         string `json:"agent_mode"`
+	CLIAlias          string `json:"cli_alias,omitempty"`
 }
 
 type ConfigureBotAgentResponse = BotResponse

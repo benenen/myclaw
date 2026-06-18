@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/benenen/myclaw/internal/channel"
@@ -140,6 +141,7 @@ type BotListItem struct {
 	ChannelAccountID  string
 	AgentCapabilityID string
 	AgentMode         string
+	CLIAlias          string
 }
 
 type StartBotLoginOutput struct {
@@ -281,6 +283,7 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 			ChannelAccountID:  bot.ChannelAccountID,
 			AgentCapabilityID: bot.AgentCapabilityID,
 			AgentMode:         bot.AgentMode,
+			CLIAlias:          bot.CLIAlias,
 		})
 	}
 	return items, nil
@@ -290,6 +293,7 @@ type ConfigureBotAgentInput struct {
 	BotID             string
 	AgentCapabilityID string
 	AgentMode         string
+	CLIAlias          string
 }
 
 func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAgentInput) (BotListItem, error) {
@@ -302,6 +306,7 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 	}
 	bot.AgentCapabilityID = input.AgentCapabilityID
 	bot.AgentMode = input.AgentMode
+	bot.CLIAlias = strings.TrimSpace(input.CLIAlias)
 	bot, err = s.bots.Update(ctx, bot)
 	if err != nil {
 		return BotListItem{}, err
@@ -315,6 +320,7 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 		ChannelAccountID:  bot.ChannelAccountID,
 		AgentCapabilityID: bot.AgentCapabilityID,
 		AgentMode:         bot.AgentMode,
+		CLIAlias:          bot.CLIAlias,
 	}, nil
 }
 

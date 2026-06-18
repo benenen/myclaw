@@ -255,3 +255,17 @@ func writeACPJSON(v map[string]any) {
 	}
 	fmt.Println(string(data))
 }
+
+func TestBuildACPArgsInjectsForAliasedRealCLI(t *testing.T) {
+	got := buildACPArgs("oc", nil, true)
+	if len(got) == 0 || got[0] != "acp" {
+		t.Fatalf("expected acp injected for realCLI alias, got %v", got)
+	}
+}
+
+func TestBuildACPArgsSkipsForStubWhenNotRealCLI(t *testing.T) {
+	got := buildACPArgs("/tmp/fake-opencode", []string{"x"}, false)
+	if len(got) != 1 || got[0] != "x" {
+		t.Fatalf("expected verbatim args for stub, got %v", got)
+	}
+}
