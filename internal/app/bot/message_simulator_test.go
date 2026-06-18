@@ -222,6 +222,7 @@ func TestMessageSimulatorSimulateTriggersReplyGateway(t *testing.T) {
 		fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
 			return defaultTestSpec, nil
 		}},
+		nil,
 	)
 
 	simulator := NewMessageSimulator(
