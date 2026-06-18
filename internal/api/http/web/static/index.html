@@ -83,39 +83,53 @@
       </div>
 
       <div id="workspace-detail" style="display:none;">
-        <div class="card hero">
+        <div class="card hero" id="detail-info-card" data-card="info">
           <div class="card-header">
             <div class="hero-id">
               <span class="card-title" id="detail-name">-</span>
               <span class="hero-sub" id="detail-bot-id">-</span>
             </div>
-            <span id="detail-status-badge"></span>
-          </div>
-          <div class="info-grid">
-            <div class="info-cell">
-              <span class="info-cell-label">Channel</span>
-              <strong class="info-cell-value" id="detail-channel">-</strong>
+            <div class="hero-actions">
+              <span id="detail-status-badge"></span>
+              <button class="card-toggle" type="button" onclick="toggleCard('info')" aria-label="Toggle bot info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
             </div>
-            <div class="info-cell">
-              <span class="info-cell-label">Account</span>
-              <strong class="info-cell-value" id="detail-account-id">-</strong>
+          </div>
+          <div class="card-body">
+            <div class="info-grid">
+              <div class="info-cell">
+                <span class="info-cell-label">Channel</span>
+                <strong class="info-cell-value" id="detail-channel">-</strong>
+              </div>
+              <div class="info-cell">
+                <span class="info-cell-label">Account</span>
+                <strong class="info-cell-value" id="detail-account-id">-</strong>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="card">
-          <span class="card-subtitle"><span class="marker-label">// AGENT</span></span>
-          <div class="form-grid">
-            <div class="form-field wide">
-              <label>Capability</label>
-              <select id="detail-agent-capability"></select>
-            </div>
-            <div class="form-field wide">
-              <label>Mode</label>
-              <select id="detail-agent-mode"></select>
-            </div>
-            <div class="form-field action">
-              <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
+        <div class="card" id="detail-agent-card" data-card="agent">
+          <div class="card-subtitle-row">
+            <span class="card-subtitle"><span class="marker-label">// AGENT</span></span>
+            <button class="card-toggle" type="button" onclick="toggleCard('agent')" aria-label="Toggle agent">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-field wide">
+                <label>Capability</label>
+                <select id="detail-agent-capability"></select>
+              </div>
+              <div class="form-field wide">
+                <label>Mode</label>
+                <select id="detail-agent-mode"></select>
+              </div>
+              <div class="form-field action">
+                <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
+              </div>
             </div>
           </div>
         </div>
