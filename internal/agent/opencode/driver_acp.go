@@ -41,8 +41,17 @@ type ACPRuntime struct {
 
 	sessionID      string
 	sessionWorkDir string
+	sessionAdopted bool
 	activeSession  string
 	activePromptCh chan acpPromptEvent
+}
+
+// getSessionID returns the opencode session id (from session/new or an adopted
+// resume id), guarded by the runtime mutex.
+func (r *ACPRuntime) getSessionID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionID
 }
 
 type acpRPCRequest struct {
@@ -221,18 +230,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 		r.mu.Unlock()
 	}()
 
-	go func() {
-		_, rpcErr := r.rpc(runCtx, "session/prompt", map[string]any{
-			"sessionId": sessionID,
-			"text":      prompt,
-		})
-		if rpcErr != nil {
-			select {
-			case promptCh <- acpPromptEvent{Kind: "error", Err: rpcErr}:
-			default:
-			}
-		}
-	}()
+	go r.sendPrompt(runCtx, sessionID, workDir, prompt, promptCh)
 
 	var parts []string
 	for {
@@ -275,8 +273,73 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					RuntimeType: runtimeTypeOpencode,
 					ExitCode:    0,
 					RawOutput:   text,
+					SessionID:   r.getSessionID(),
 				}, nil
 			}
+		}
+	}
+}
+
+// sendPrompt issues session/prompt for the active turn. If the session was
+// adopted from a resume id and the server rejects it, it clears that session,
+// creates a fresh one via session/new, re-points the active turn routing at the
+// new id, and retries the prompt exactly once. Any final error is delivered on
+// promptCh so Run can fail the turn.
+func (r *ACPRuntime) sendPrompt(ctx context.Context, sessionID, workDir, prompt string, promptCh chan acpPromptEvent) {
+	_, rpcErr := r.rpc(ctx, "session/prompt", map[string]any{
+		"sessionId": sessionID,
+		"text":      prompt,
+	})
+	if rpcErr == nil {
+		return
+	}
+
+	// Only recover when the failed session was adopted from a resume id; a
+	// genuinely broken server should surface the error rather than loop.
+	r.mu.Lock()
+	adopted := r.sessionAdopted && r.sessionID == sessionID
+	r.mu.Unlock()
+	if !adopted || ctx.Err() != nil {
+		select {
+		case promptCh <- acpPromptEvent{Kind: "error", Err: rpcErr}:
+		default:
+		}
+		return
+	}
+
+	slog.Warn("opencode acp resumed session rejected; recovering with session/new", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "session_id", sessionID, "error", rpcErr)
+	r.mu.Lock()
+	if r.sessionID == sessionID {
+		r.sessionID = ""
+		r.sessionWorkDir = ""
+		r.sessionAdopted = false
+	}
+	r.mu.Unlock()
+
+	newID, err := r.newSession(ctx, workDir)
+	if err != nil {
+		select {
+		case promptCh <- acpPromptEvent{Kind: "error", Err: rpcErr}:
+		default:
+		}
+		return
+	}
+
+	// Re-point the in-flight turn at the recovered session so the read loop's
+	// session-scoped dispatch matches the new id.
+	r.mu.Lock()
+	if r.activePromptCh == promptCh {
+		r.activeSession = newID
+	}
+	r.mu.Unlock()
+
+	if _, retryErr := r.rpc(ctx, "session/prompt", map[string]any{
+		"sessionId": newID,
+		"text":      prompt,
+	}); retryErr != nil {
+		select {
+		case promptCh <- acpPromptEvent{Kind: "error", Err: retryErr}:
+		default:
 		}
 	}
 }
@@ -351,16 +414,33 @@ func (r *ACPRuntime) ensureSession(ctx context.Context, workDir string) (string,
 	r.mu.Lock()
 	sessionID := r.sessionID
 	sessionWorkDir := r.sessionWorkDir
+	resumeID := strings.TrimSpace(r.spec.ResumeSessionID)
 	r.mu.Unlock()
 
 	if sessionID != "" && sessionWorkDir == workDir {
 		return sessionID, nil
 	}
 
-	params := map[string]any{
-		"cwd": workDir,
+	// Best-effort reuse: when the resolver supplied a prior session id and we
+	// have no live session yet, adopt it without a round trip and skip
+	// session/new. If the server later rejects it on session/prompt, Run clears
+	// it and recovers via newSession (see recoverSession).
+	if sessionID == "" && resumeID != "" {
+		r.mu.Lock()
+		r.sessionID = resumeID
+		r.sessionWorkDir = workDir
+		r.sessionAdopted = true
+		r.mu.Unlock()
+		slog.Info("opencode acp adopted resumed session", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "session_id", resumeID)
+		return resumeID, nil
 	}
-	result, err := r.rpc(ctx, "session/new", params)
+
+	return r.newSession(ctx, workDir)
+}
+
+// newSession creates a fresh session via session/new and caches it.
+func (r *ACPRuntime) newSession(ctx context.Context, workDir string) (string, error) {
+	result, err := r.rpc(ctx, "session/new", map[string]any{"cwd": workDir})
 	if err != nil {
 		return "", err
 	}
@@ -380,6 +460,7 @@ func (r *ACPRuntime) ensureSession(ctx context.Context, workDir string) (string,
 	r.mu.Lock()
 	r.sessionID = sessionResult.Session.ID
 	r.sessionWorkDir = workDir
+	r.sessionAdopted = false
 	r.mu.Unlock()
 	return sessionResult.Session.ID, nil
 }
