@@ -70,6 +70,7 @@ func (p *Provider) StartRuntime(ctx context.Context, req channel.StartRuntimeReq
 	}
 
 	go func() {
+		defer cancel()
 		defer close(handle.done)
 		defer p.registry.Unregister(req.BotID)
 
