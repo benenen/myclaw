@@ -246,3 +246,40 @@ func TestBotCLIResolverResolveReturnsCapabilityLookupError(t *testing.T) {
 		t.Fatalf("expected lookup failed, got %v", err)
 	}
 }
+
+func TestResolveAliasOverridesCommandAndBypassesAvailability(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_alias", Name: "b", AgentCapabilityID: "cap_codex",
+		AgentMode: "acp", CLIAlias: "cx",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		// NOT available and canonical command — alias must bypass the gate.
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+
+	spec, err := r.Resolve(context.Background(), "bot_alias")
+	if err != nil {
+		t.Fatalf("Resolve with alias should bypass availability: %v", err)
+	}
+	if spec.Command != "cx" {
+		t.Fatalf("spec.Command = %q, want cx", spec.Command)
+	}
+	if !spec.RealCLI {
+		t.Fatalf("spec.RealCLI = false, want true when alias set")
+	}
+}
+
+func TestResolveNoAliasKeepsDefaultAndUnavailableErrors(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_noalias", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "acp",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+
+	if _, err := r.Resolve(context.Background(), "bot_noalias"); !errors.Is(err, ErrBotCLIUnavailable) {
+		t.Fatalf("no alias + unavailable should error ErrBotCLIUnavailable, got %v", err)
+	}
+}
