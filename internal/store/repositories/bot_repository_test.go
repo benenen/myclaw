@@ -277,6 +277,44 @@ func TestBotRepositoryUpdateConnectionState(t *testing.T) {
 	}
 }
 
+func TestBotRepositoryPreservesCLIAlias(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, domain.Bot{
+		ID:               "bot_alias_1",
+		UserID:           "usr_1",
+		Name:             "alias-bot",
+		ChannelType:      "wechat",
+		ConnectionStatus: domain.BotConnectionStatusLoginRequired,
+		CLIAlias:         "cx",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.GetByID(ctx, "bot_alias_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CLIAlias != "cx" {
+		t.Fatalf("CLIAlias after create = %q, want cx", got.CLIAlias)
+	}
+
+	got.CLIAlias = ""
+	if _, err := repo.Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := repo.GetByID(ctx, "bot_alias_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.CLIAlias != "" {
+		t.Fatalf("CLIAlias after clear = %q, want empty", again.CLIAlias)
+	}
+}
+
 func TestBotRepositoryDeleteByID(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	repo := NewBotRepository(db)

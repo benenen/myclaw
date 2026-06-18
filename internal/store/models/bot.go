@@ -14,6 +14,7 @@ type Bot struct {
 	AgentCapabilityID string `gorm:"not null;default:''"`
 	AgentMode         string `gorm:"not null;default:''"`
 	Role              string `gorm:"not null;default:''"`
+	CLIAlias          string `gorm:"not null;default:''"`
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
