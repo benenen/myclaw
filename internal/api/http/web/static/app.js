@@ -58,6 +58,7 @@ function selectedBot() {
 function renderSelectedBotAgentControls() {
   const bot = selectedBot();
   renderCapabilityOptions('detail-agent-capability', 'detail-agent-mode', bot?.agent_capability_id || '', bot?.agent_mode || '');
+  document.getElementById('detail-agent-alias').value = bot?.cli_alias || '';
 }
 
 async function saveSelectedBotAgent() {
@@ -65,16 +66,19 @@ async function saveSelectedBotAgent() {
   if (!bot) { toast('select a bot'); return; }
   const agentCapabilityID = document.getElementById('detail-agent-capability').value;
   const agentMode = document.getElementById('detail-agent-mode').value;
+  const cliAlias = document.getElementById('detail-agent-alias').value.trim();
   if (!agentCapabilityID || !agentMode) { toast('capability and mode required'); return; }
   const data = await api('POST', '/bots/agent', {
     bot_id: bot.bot_id,
     agent_capability_id: agentCapabilityID,
     agent_mode: agentMode,
+    cli_alias: cliAlias,
   });
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const updated = data.data;
   bot.agent_capability_id = updated.agent_capability_id;
   bot.agent_mode = updated.agent_mode;
+  bot.cli_alias = updated.cli_alias || '';
   renderSelectedBotAgentControls();
   renderBotList();
   renderDetail();
