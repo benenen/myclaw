@@ -40,6 +40,7 @@ type App struct {
 
 func New(cfg config.Config) (*App, error) {
 	logger := logging.New(cfg.LogLevel)
+	logging.SetDefaultSlog(cfg.LogLevel)
 
 	if cfg.DataDir != "" {
 		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {

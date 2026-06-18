@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -68,7 +69,9 @@ func (r *ExecRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 		return agent.Response{}, fmt.Errorf("codex exec request prompt is required")
 	}
 
-	println(prompt)
+	start := time.Now()
+	slog.Info("agent turn start", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "prompt_len", len(prompt))
+	slog.Debug("agent turn prompt", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "prompt", prompt)
 
 	runCtx := ctx
 	cancel := func() {}
@@ -80,6 +83,7 @@ func (r *ExecRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 	args := append([]string(nil), r.spec.Args...)
 	args = append(args, "exec", "--json", "--skip-git-repo-check", "resume", "--last", prompt)
 
+	slog.Info("agent cli launching", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "command", r.spec.Command, "args", agent.SummarizeArgs(args), "real_cli", r.spec.RealCLI)
 	cmd := exec.CommandContext(runCtx, r.spec.Command, args...)
 	if workDir := strings.TrimSpace(req.WorkDir); workDir != "" {
 		cmd.Dir = workDir
@@ -95,37 +99,45 @@ func (r *ExecRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	start := time.Now()
-	err := cmd.Run()
+	runErr := cmd.Run()
 	duration := time.Since(start)
 	rawOutput := stdout.String()
 
 	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
 		if runCtx.Err() != nil {
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-				return agent.Response{}, fmt.Errorf("codex exec timed out: %w", runCtx.Err())
+				err := fmt.Errorf("codex exec timed out: %w", runCtx.Err())
+				slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "error", err)
+				return agent.Response{}, err
 			}
 			if errors.Is(runCtx.Err(), context.Canceled) {
-				return agent.Response{}, fmt.Errorf("codex exec canceled: %w", runCtx.Err())
+				err := fmt.Errorf("codex exec canceled: %w", runCtx.Err())
+				slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "error", err)
+				return agent.Response{}, err
 			}
+			slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "error", runCtx.Err())
 			return agent.Response{}, runCtx.Err()
 		}
 		message := extractExecFailureMessage(rawOutput, strings.TrimSpace(stderr.String()))
 		if message == "" {
-			message = err.Error()
+			message = runErr.Error()
 		}
-		return agent.Response{Text: message, RuntimeType: runtimeTypeCodex, ExitCode: exitCode, Duration: duration, RawOutput: rawOutput}, fmt.Errorf("codex exec failed: %s", message)
+		err := fmt.Errorf("codex exec failed: %s", message)
+		slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "error", err)
+		return agent.Response{Text: message, RuntimeType: runtimeTypeCodex, ExitCode: exitCode, Duration: duration, RawOutput: rawOutput}, err
 	}
 
-	text, err := lastCompletedItemText(rawOutput)
-	if err != nil {
-		return agent.Response{RuntimeType: runtimeTypeCodex, ExitCode: exitCode, Duration: duration, RawOutput: rawOutput}, err
+	text, parseErr := lastCompletedItemText(rawOutput)
+	if parseErr != nil {
+		slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "error", parseErr)
+		return agent.Response{RuntimeType: runtimeTypeCodex, ExitCode: exitCode, Duration: duration, RawOutput: rawOutput}, parseErr
 	}
 
+	slog.Info("agent turn done", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "duration", time.Since(start), "exit_code", exitCode)
 	return agent.Response{
 		Text:        text,
 		RuntimeType: runtimeTypeCodex,

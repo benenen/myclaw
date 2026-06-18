@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// SetDefaultSlog routes the stdlib slog default logger to the same stderr
+// text handler at the given level, so packages that log via slog (e.g. the
+// agent drivers) honor LOG_LEVEL.
+func SetDefaultSlog(level string) {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: parseLevel(level)})))
+}
+
 type Logger struct {
 	inner *slog.Logger
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,7 +91,9 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		return nil, fmt.Errorf("claude acp driver requires command")
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args, spec.RealCLI)...)
+	acpArgs := buildACPArgs(spec.Command, spec.Args, spec.RealCLI)
+	slog.Info("agent cli launching", "bot_id", spec.BotID, "runtime", runtimeTypeClaude, "command", spec.Command, "args", agent.SummarizeArgs(acpArgs), "real_cli", spec.RealCLI)
+	cmd := exec.CommandContext(ctx, spec.Command, acpArgs...)
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -172,16 +175,22 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	}
 
 	start := time.Now()
+	slog.Info("agent turn start", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "prompt_len", len(prompt))
+	slog.Debug("agent turn prompt", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "prompt", prompt)
 	for {
 		select {
 		case <-runCtx.Done():
 			err := classifyContextError(runCtx.Err())
 			r.markBroken(err)
+			slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "error", err)
 			return agent.Response{}, err
 		case evt := <-turnCh:
+			slog.Debug("agent turn event", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "done", evt.done)
 			if evt.err != nil {
 				r.markBroken(evt.err)
-				return agent.Response{}, fmt.Errorf("claude acp turn failed: %w", evt.err)
+				err := fmt.Errorf("claude acp turn failed: %w", evt.err)
+				slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "error", err)
+				return agent.Response{}, err
 			}
 			if !evt.done {
 				continue
@@ -196,19 +205,22 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					r.state = stateReady
 				}
 				r.mu.Unlock()
+				err := fmt.Errorf("claude acp turn error: %s", text)
+				slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "error", err)
 				return agent.Response{
 					Text:        text,
 					RuntimeType: runtimeTypeClaude,
 					ExitCode:    1,
 					Duration:    time.Since(start),
 					RawOutput:   text,
-				}, fmt.Errorf("claude acp turn error: %s", text)
+				}, err
 			}
 			r.mu.Lock()
 			if r.state != stateBroken {
 				r.state = stateReady
 			}
 			r.mu.Unlock()
+			slog.Info("agent turn done", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "duration", time.Since(start))
 			return agent.Response{
 				Text:        text,
 				RuntimeType: runtimeTypeClaude,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,7 +99,9 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		return nil, fmt.Errorf("opencode acp driver requires command")
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args, spec.RealCLI)...)
+	acpArgs := buildACPArgs(spec.Command, spec.Args, spec.RealCLI)
+	slog.Info("agent cli launching", "bot_id", spec.BotID, "runtime", runtimeTypeOpencode, "command", spec.Command, "args", agent.SummarizeArgs(acpArgs), "real_cli", spec.RealCLI)
+	cmd := exec.CommandContext(ctx, spec.Command, acpArgs...)
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -182,6 +185,10 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	r.state = stateRunning
 	r.mu.Unlock()
 
+	start := time.Now()
+	slog.Info("agent turn start", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "prompt_len", len(prompt))
+	slog.Debug("agent turn prompt", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "prompt", prompt)
+
 	runCtx := ctx
 	cancel := func() {}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline && r.spec.Timeout > 0 {
@@ -233,11 +240,15 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 		case <-runCtx.Done():
 			err := classifyACPContextError(runCtx.Err())
 			r.markBroken(err)
+			slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "error", err)
 			return agent.Response{}, err
 		case evt := <-promptCh:
+			slog.Debug("agent turn event", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "kind", evt.Kind, "is_error", evt.Err != nil)
 			if evt.Err != nil {
 				r.markBroken(evt.Err)
-				return agent.Response{}, fmt.Errorf("opencode acp prompt failed: %w", evt.Err)
+				err := fmt.Errorf("opencode acp prompt failed: %w", evt.Err)
+				slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "error", err)
+				return agent.Response{}, err
 			}
 			if evt.Delta != "" {
 				parts = append(parts, evt.Delta)
@@ -250,6 +261,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 				if text == "" {
 					err := fmt.Errorf("opencode acp returned empty response")
 					r.markBroken(err)
+					slog.Error("agent turn failed", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "error", err)
 					return agent.Response{}, err
 				}
 				r.mu.Lock()
@@ -257,6 +269,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					r.state = stateReady
 				}
 				r.mu.Unlock()
+				slog.Info("agent turn done", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "duration", time.Since(start))
 				return agent.Response{
 					Text:        text,
 					RuntimeType: runtimeTypeOpencode,
