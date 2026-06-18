@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ type BotService struct {
 	cipher               *security.Cipher
 	provider             channel.Provider
 	runtimes             *BotConnectionManager
+	workspaceRoot        string
 }
 
 type capabilityDiscoverer interface {
@@ -86,8 +88,13 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 	if botType == domain.BotTypeHook {
 		connectionStatus = ""
 	}
+	botID := domain.NewPrefixedID("bot")
+	workspace := ""
+	if s.workspaceRoot != "" {
+		workspace = filepath.Join(s.workspaceRoot, botID, "workspace")
+	}
 	bot, err := s.bots.Create(ctx, domain.Bot{
-		ID:                domain.NewPrefixedID("bot"),
+		ID:                botID,
 		UserID:            user.ID,
 		Name:              input.Name,
 		Type:              botType,
@@ -96,6 +103,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		ConnectionStatus:  connectionStatus,
 		AgentCapabilityID: input.AgentCapabilityID,
 		AgentMode:         input.AgentMode,
+		Workspace:         workspace,
 	})
 	if err != nil {
 		return CreateBotOutput{}, err
@@ -361,6 +369,16 @@ func (s *BotService) ListAgentCapabilities(ctx context.Context) ([]AgentCapabili
 
 func (s *BotService) SetCapabilityDiscoverer(d capabilityDiscoverer) {
 	s.capabilityDiscoverer = d
+}
+
+func (s *BotService) SetWorkspaceRoot(root string) { s.workspaceRoot = root }
+
+func (s *BotService) GetBotWorkspace(ctx context.Context, botID string) (string, error) {
+	b, err := s.bots.GetByID(ctx, botID)
+	if err != nil {
+		return "", err
+	}
+	return b.Workspace, nil
 }
 
 func (s *BotService) StartLogin(ctx context.Context, input StartBotLoginInput) (StartBotLoginOutput, error) {

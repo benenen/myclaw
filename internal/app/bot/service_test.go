@@ -676,6 +676,23 @@ func TestBotServiceRefreshLoginReturnsQRReadyBeforeConfirm(t *testing.T) {
 	}
 }
 
+func TestCreateBotDefaultsWorkspace(t *testing.T) {
+	svc := newTestBotService(t)
+	svc.SetWorkspaceRoot("/data/bots")
+	out, err := svc.CreateBot(context.Background(), CreateBotInput{ExternalUserID: "u1", Name: "b", Type: domain.BotTypeChannel, ChannelType: "wechat"})
+	if err != nil {
+		t.Fatalf("CreateBot: %v", err)
+	}
+	got, err := svc.GetBotWorkspace(context.Background(), out.BotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/data/bots/" + out.BotID + "/workspace"
+	if got != want {
+		t.Fatalf("workspace = %q, want %q", got, want)
+	}
+}
+
 func TestBotServiceRefreshLoginRejectsEmptyBindingID(t *testing.T) {
 	svc := newTestBotService(t)
 	_, err := svc.RefreshLogin(context.Background(), "")

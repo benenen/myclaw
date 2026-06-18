@@ -298,3 +298,21 @@ func TestResolveAliasStillValidatesMode(t *testing.T) {
 		t.Fatalf("alias set but unsupported mode should return ErrBotCLIUnsupportedMode, got %v", err)
 	}
 }
+
+func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_w", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp",
+		Workspace: "/custom/ws",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{}) // NOTE: Task 5 adds a sessions arg; if Task 5 is done first, pass the stub
+	spec, err := r.Resolve(context.Background(), "bot_w")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec.WorkDir != "/custom/ws" {
+		t.Fatalf("WorkDir = %q, want /custom/ws", spec.WorkDir)
+	}
+}

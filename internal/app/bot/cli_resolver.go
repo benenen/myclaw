@@ -94,8 +94,12 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		SQLitePath: r.sqlitePath,
 		RealCLI:    alias != "",
 	}
-	if r.workspaceRoot != "" {
-		spec.WorkDir = filepath.Join(r.workspaceRoot, botID, "workspace")
+	workDir := strings.TrimSpace(bot.Workspace)
+	if workDir == "" && r.workspaceRoot != "" {
+		workDir = filepath.Join(r.workspaceRoot, botID, "workspace")
+	}
+	if workDir != "" {
+		spec.WorkDir = workDir
 		if err := os.MkdirAll(spec.WorkDir, 0o755); err != nil {
 			return agent.Spec{}, err
 		}
