@@ -98,7 +98,7 @@ func New(cfg config.Config) (*App, error) {
 	multiReplyGateway.Register("feishu", feishuReplyGateway)
 
 	executor := agent.NewManager()
-	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
+	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, nil, bot.BotCLIResolverConfig{
 		Timeout:             botCLITimeout,
 		WorkspaceRoot:       cfg.BotWorkspaceRoot(),
 		SQLitePath:          cfg.SQLitePath,
