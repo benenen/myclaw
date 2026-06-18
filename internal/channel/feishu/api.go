@@ -108,7 +108,7 @@ func (a *apiClient) botInfo(ctx context.Context, token string) (AppInfo, error) 
 
 // buildTextContent constructs the JSON content string for a text message.
 // When p.Mentions is non-empty each open_id is prepended as an @-mention tag
-// using the SDK builder so the final text is "​<at user_id="id"></at> … body".
+// using the SDK builder so the final text is "<at user_id="id"></at> … body".
 func buildTextContent(p SendParams) string {
 	b := larkim.NewTextMsgBuilder()
 	for _, openID := range p.Mentions {
