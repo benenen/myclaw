@@ -367,3 +367,25 @@ func TestResolveNoStoredSessionLeavesResumeEmpty(t *testing.T) {
 		t.Fatalf("ResumeSessionID = %q, want empty", spec.ResumeSessionID)
 	}
 }
+
+type erroringSessionRepoStub struct{}
+
+func (erroringSessionRepoStub) Upsert(context.Context, domain.BotCLISession) error { return nil }
+func (erroringSessionRepoStub) Get(context.Context, string, string) (domain.BotCLISession, error) {
+	return domain.BotCLISession{}, errors.New("db down")
+}
+
+func TestResolveSessionLookupErrorIsNonFatal(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{ID: "bot_e", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp"})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, erroringSessionRepoStub{}, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_e")
+	if err != nil {
+		t.Fatalf("session lookup error must be non-fatal, got %v", err)
+	}
+	if spec.ResumeSessionID != "" {
+		t.Fatalf("ResumeSessionID = %q, want empty on lookup error", spec.ResumeSessionID)
+	}
+}
