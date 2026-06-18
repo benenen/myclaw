@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,15 +111,23 @@ func (a *apiClient) botInfo(ctx context.Context, token string) (AppInfo, error) 
 // When p.Mentions is non-empty each open_id is prepended as an @-mention tag
 // using the SDK builder so the final text is "<at user_id="id"></at> … body".
 func buildTextContent(p SendParams) string {
-	b := larkim.NewTextMsgBuilder()
-	for _, openID := range p.Mentions {
-		b.AtUser(openID, "")
-	}
+	text := p.Text
 	if len(p.Mentions) > 0 {
-		b.Text(" ")
+		var sb strings.Builder
+		for _, openID := range p.Mentions {
+			sb.WriteString(`<at user_id="`)
+			sb.WriteString(openID)
+			sb.WriteString(`"></at>`)
+		}
+		sb.WriteString(" ")
+		sb.WriteString(p.Text)
+		text = sb.String()
 	}
-	b.Text(p.Text)
-	return b.Build()
+	encoded, err := json.Marshal(map[string]string{"text": text})
+	if err != nil {
+		return `{"text":""}`
+	}
+	return string(encoded)
 }
 
 func (a *apiClient) SendText(ctx context.Context, creds Credentials, p SendParams) error {
