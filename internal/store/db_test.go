@@ -27,7 +27,7 @@ func TestMigrateCreatesCoreTables(t *testing.T) {
 	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if version != 5 {
+	if version != 6 {
 		t.Fatalf("unexpected schema version: %d", version)
 	}
 	if dirty {
@@ -52,7 +52,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := db.Raw("SELECT version, dirty FROM schema_migrations LIMIT 1").Row().Scan(&version, &dirty); err != nil {
 		t.Fatalf("query schema version: %v", err)
 	}
-	if version != 5 {
+	if version != 6 {
 		t.Fatalf("unexpected schema version: %d", version)
 	}
 	if dirty {

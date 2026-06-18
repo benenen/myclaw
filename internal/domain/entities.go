@@ -67,6 +67,7 @@ type Bot struct {
 	AgentMode         string
 	Role              string
 	CLIAlias          string
+	Workspace         string
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
