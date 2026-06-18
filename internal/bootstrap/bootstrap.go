@@ -17,6 +17,7 @@ import (
 	"github.com/benenen/myclaw/internal/app/capability"
 	"github.com/benenen/myclaw/internal/app/orchestration"
 	"github.com/benenen/myclaw/internal/channel"
+	"github.com/benenen/myclaw/internal/channel/feishu"
 	"github.com/benenen/myclaw/internal/channel/httpchan"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/config"
@@ -80,13 +81,20 @@ func New(cfg config.Config) (*App, error) {
 	httpProvider := httpchan.NewProvider(httpReceiver)
 	httpReplyGateway := httpchan.NewReplyGatewayWithReceiver(httpReceiver)
 
+	feishuRegistry := feishu.NewRegistry()
+	feishuAPI := feishu.NewAPI(feishu.LoadConfig())
+	feishuProvider := feishu.NewProvider(feishuAPI, feishu.NewDialer(), feishuRegistry, logger)
+	feishuReplyGateway := feishu.NewReplyGateway(feishuAPI, feishuRegistry)
+
 	multiProvider := channel.NewMultiProvider()
 	multiProvider.Register("wechat", wechatProvider, wechatProvider)
 	multiProvider.Register(httpchan.ChannelType, httpProvider, httpProvider)
+	multiProvider.Register("feishu", feishuProvider, feishuProvider)
 
 	multiReplyGateway := channel.NewMultiReplyGateway()
 	multiReplyGateway.Register("wechat", wechatReplyGateway)
 	multiReplyGateway.Register(httpchan.ChannelType, httpReplyGateway)
+	multiReplyGateway.Register("feishu", feishuReplyGateway)
 
 	executor := agent.NewManager()
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
