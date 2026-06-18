@@ -312,6 +312,25 @@ function renderDetail() {
   if (!activeBindingId) {
     document.getElementById('connect-result').innerHTML = '';
   }
+  restoreCardStates();
+}
+
+// ── Collapsible cards (drawer) ──────────────────────────
+
+function toggleCard(key) {
+  const card = document.querySelector(`[data-card="${key}"]`);
+  if (!card) return;
+  const collapsed = card.classList.toggle('collapsed');
+  try { localStorage.setItem('myclaw.card.' + key, collapsed ? '1' : '0'); } catch (e) { /* ignore */ }
+}
+
+function restoreCardStates() {
+  document.querySelectorAll('#workspace-detail [data-card]').forEach(card => {
+    const key = card.getAttribute('data-card');
+    let saved = null;
+    try { saved = localStorage.getItem('myclaw.card.' + key); } catch (e) { /* ignore */ }
+    card.classList.toggle('collapsed', saved === '1');
+  });
 }
 
 // ── Login Polling ───────────────────────────────────────
