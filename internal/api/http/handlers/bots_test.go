@@ -233,6 +233,33 @@ func TestDeleteBotHandlerRejectsEmptyBody(t *testing.T) {
 	testutil.AssertJSONCode(t, rr, "INVALID_ARGUMENT")
 }
 
+func TestConfigureBotAgentPersistsCLIAlias(t *testing.T) {
+	ts := newTestServer(t)
+
+	create := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_1","name":"alias-bot","type":"channel","channel_type":"wechat"}`)
+	if create.Code != stdhttp.StatusOK {
+		t.Fatalf("create status %d: %s", create.Code, create.Body.String())
+	}
+	var createEnv httpapi.Envelope
+	if err := json.Unmarshal(create.Body.Bytes(), &createEnv); err != nil {
+		t.Fatal(err)
+	}
+	botID := createEnv.Data.(map[string]any)["bot_id"].(string)
+
+	body := `{"bot_id":"` + botID + `","agent_capability_id":"cap_claude","agent_mode":"session","cli_alias":"cx"}`
+	res := testutil.PostJSON(t, ts, "/api/v1/bots/agent", body)
+	if res.Code != stdhttp.StatusOK {
+		t.Fatalf("agent status %d: %s", res.Code, res.Body.String())
+	}
+	var env httpapi.Envelope
+	if err := json.Unmarshal(res.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.Data.(map[string]any)["cli_alias"]; got != "cx" {
+		t.Fatalf("cli_alias in response = %v, want cx", got)
+	}
+}
+
 type connectConfigRecorder struct {
 	refreshConfig map[string]string
 }
