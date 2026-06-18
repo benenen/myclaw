@@ -97,7 +97,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		return nil, fmt.Errorf("codex acp driver requires command")
 	}
 
-	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args)...)
+	cmd := exec.CommandContext(ctx, spec.Command, buildACPArgs(spec.Command, spec.Args, spec.RealCLI)...)
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -310,9 +310,9 @@ func (r *ACPRuntime) Close() error {
 	return closeErr
 }
 
-func buildACPArgs(command string, args []string) []string {
+func buildACPArgs(command string, args []string, realCLI bool) []string {
 	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
-	if base != "codex" && base != "codex.exe" {
+	if base != "codex" && base != "codex.exe" && !realCLI {
 		return append([]string(nil), args...)
 	}
 

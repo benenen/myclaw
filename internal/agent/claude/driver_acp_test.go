@@ -219,3 +219,17 @@ func writeStreamJSON(v map[string]any) {
 	}
 	fmt.Println(string(data))
 }
+
+func TestBuildACPArgsInjectsForAliasedRealCLI(t *testing.T) {
+	got := buildACPArgs("cl", nil, true)
+	if len(got) == 0 || got[0] != "-p" {
+		t.Fatalf("expected -p injected for realCLI alias, got %v", got)
+	}
+}
+
+func TestBuildACPArgsSkipsForStubWhenNotRealCLI(t *testing.T) {
+	got := buildACPArgs("/tmp/fake-claude", []string{"x"}, false)
+	if len(got) != 1 || got[0] != "x" {
+		t.Fatalf("expected verbatim args for stub, got %v", got)
+	}
+}

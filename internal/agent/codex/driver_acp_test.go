@@ -277,3 +277,18 @@ func writeACPJSON(v map[string]any) {
 	}
 	fmt.Println(string(data))
 }
+
+func TestBuildACPArgsInjectsForAliasedRealCLI(t *testing.T) {
+	// basename "cx" is not canonical, but realCLI=true must still inject app-server.
+	got := buildACPArgs("cx", nil, true)
+	if len(got) == 0 || got[0] != "app-server" {
+		t.Fatalf("expected app-server injected for realCLI alias, got %v", got)
+	}
+}
+
+func TestBuildACPArgsSkipsForStubWhenNotRealCLI(t *testing.T) {
+	got := buildACPArgs("/tmp/fake-codex", []string{"x"}, false)
+	if len(got) != 1 || got[0] != "x" {
+		t.Fatalf("expected verbatim args for stub, got %v", got)
+	}
+}
