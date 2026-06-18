@@ -283,3 +283,18 @@ func TestResolveNoAliasKeepsDefaultAndUnavailableErrors(t *testing.T) {
 		t.Fatalf("no alias + unavailable should error ErrBotCLIUnavailable, got %v", err)
 	}
 }
+
+func TestResolveAliasStillValidatesMode(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_alias_badmode", Name: "b", AgentCapabilityID: "cap_codex",
+		AgentMode: "nope", CLIAlias: "cx",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+
+	if _, err := r.Resolve(context.Background(), "bot_alias_badmode"); !errors.Is(err, ErrBotCLIUnsupportedMode) {
+		t.Fatalf("alias set but unsupported mode should return ErrBotCLIUnsupportedMode, got %v", err)
+	}
+}
