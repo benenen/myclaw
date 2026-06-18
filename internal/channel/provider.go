@@ -14,6 +14,7 @@ type Provider interface {
 type CreateBindingRequest struct {
 	BindingID   string
 	ChannelType string
+	Config      map[string]string
 }
 
 type CreateBindingResult struct {
@@ -26,6 +27,7 @@ type CreateBindingResult struct {
 type RefreshBindingRequest struct {
 	ProviderBindingRef string
 	ChannelType        string
+	Config             map[string]string
 }
 
 type RefreshBindingResult struct {
