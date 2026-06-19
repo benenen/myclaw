@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,6 +211,71 @@ func TestACPRuntimeRecoversWhenReusedSessionRejected(t *testing.T) {
 	}
 }
 
+// TestACPDriverEmitsToolProgress asserts that a session/update carrying a
+// tool_call_update (in_progress) notification causes exactly one ProgressEvent
+// to be delivered via Request.OnProgress, and that the existing text/contentItem
+// path still works correctly alongside it.
+func TestACPDriverEmitsToolProgress(t *testing.T) {
+	workDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acp-tool-call.log")
+
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessOpencodeACP", "--", "acp-tool-call"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         logPath,
+		},
+		WorkDir: workDir,
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	var mu sync.Mutex
+	var events []agent.ProgressEvent
+
+	resp, err := runtime.Run(context.Background(), agent.Request{
+		Prompt:  "hello",
+		WorkDir: workDir,
+		OnProgress: func(ev agent.ProgressEvent) {
+			mu.Lock()
+			events = append(events, ev)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "reply:hello" {
+		t.Fatalf("Run() text = %q, want reply:hello", resp.Text)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// The fake emits two tool_call_update(in_progress) for the same toolCallId;
+	// the driver must deduplicate to exactly one ProgressEvent.
+	if len(events) != 1 {
+		t.Fatalf("got %d ProgressEvents, want 1: %+v", len(events), events)
+	}
+	ev := events[0]
+	if ev.Kind != "tool" {
+		t.Errorf("ProgressEvent.Kind = %q, want tool", ev.Kind)
+	}
+	// title="bash" from the fake's rawInput; TargetFromInput("bash","ls -la") → "ls -la"
+	if ev.Tool != "bash" {
+		t.Errorf("ProgressEvent.Tool = %q, want bash", ev.Tool)
+	}
+	if ev.Target != "ls -la" {
+		t.Errorf("ProgressEvent.Target = %q, want ls -la", ev.Target)
+	}
+}
+
 func countACPMethod(lines []string, method string) int {
 	count := 0
 	for _, line := range lines {
@@ -232,7 +298,7 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 			mode = args[i+1]
 		}
 	}
-	if mode != "acp-success" && mode != "acp-reject-reused" {
+	if mode != "acp-success" && mode != "acp-reject-reused" && mode != "acp-tool-call" {
 		os.Exit(2)
 	}
 
@@ -313,7 +379,8 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 				})
 				continue
 			}
-			// In acp-success mode an adopted resume id is accepted as-is.
+			// In acp-success / acp-tool-call mode an adopted resume id is
+			// accepted as-is.
 			sessionID = gotSessionID
 			currentPrompt, _ = params["text"].(string)
 
@@ -324,6 +391,43 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 					"promptId": fmt.Sprintf("prompt-%d", promptCount),
 				},
 			})
+
+			// In acp-tool-call mode emit a tool_call_update (in_progress) before
+			// the text reply, mirroring the confirmed opencode 1.15.13 shape.
+			if mode == "acp-tool-call" {
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"sessionId": sessionID,
+						"update": map[string]any{
+							"sessionUpdate": "tool_call_update",
+							"toolCallId":    "call_test_001",
+							"status":        "in_progress",
+							"title":         "bash",
+							"kind":          "execute",
+							"rawInput":      map[string]any{"command": "ls -la"},
+						},
+					},
+				})
+				// Also emit a second update for the same call — the driver must
+				// deduplicate and emit only one ProgressEvent.
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"sessionId": sessionID,
+						"update": map[string]any{
+							"sessionUpdate": "tool_call_update",
+							"toolCallId":    "call_test_001",
+							"status":        "in_progress",
+							"title":         "bash",
+							"kind":          "execute",
+							"rawInput":      map[string]any{"command": "ls -la"},
+						},
+					},
+				})
+			}
 
 			writeACPJSON(map[string]any{
 				"jsonrpc": "2.0",

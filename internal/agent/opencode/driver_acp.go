@@ -44,6 +44,11 @@ type ACPRuntime struct {
 	sessionAdopted bool
 	activeSession  string
 	activePromptCh chan acpPromptEvent
+	activeProgress func(agent.ProgressEvent)
+	// seenToolCalls tracks toolCallIds for which we already emitted a
+	// ProgressEvent in the current turn, to avoid duplicate events when
+	// opencode sends multiple tool_call_update notifications for the same call.
+	seenToolCalls map[string]bool
 }
 
 // getSessionID returns the opencode session id (from session/new or an adopted
@@ -220,12 +225,16 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	r.mu.Lock()
 	r.activeSession = sessionID
 	r.activePromptCh = promptCh
+	r.activeProgress = req.OnProgress
+	r.seenToolCalls = make(map[string]bool)
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		if r.activePromptCh == promptCh {
 			r.activePromptCh = nil
 			r.activeSession = ""
+			r.activeProgress = nil
+			r.seenToolCalls = nil
 		}
 		r.mu.Unlock()
 	}()
@@ -660,6 +669,16 @@ func (r *ACPRuntime) handleSessionUpdate(params json.RawMessage) {
 			Delta     string `json:"delta,omitempty"`
 			Completed bool   `json:"completed,omitempty"`
 		} `json:"contentItems"`
+		// Update is the opencode 1.15+ ACP envelope that wraps all event kinds
+		// including tool_call_update notifications.
+		Update struct {
+			SessionUpdate string         `json:"sessionUpdate"`
+			ToolCallID    string         `json:"toolCallId"`
+			Status        string         `json:"status"`
+			Title         string         `json:"title"`
+			Kind          string         `json:"kind"`
+			RawInput      map[string]any `json:"rawInput"`
+		} `json:"update"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
 		return
@@ -667,12 +686,52 @@ func (r *ACPRuntime) handleSessionUpdate(params json.RawMessage) {
 
 	sessionID := payload.SessionID
 
+	// Handle tool-call progress events from opencode's ACP update envelope.
+	// Confirmed shape from live capture (opencode 1.15.13):
+	//   tool_call        — status:"pending",     rawInput:{} (input not yet known)
+	//   tool_call_update — status:"in_progress", rawInput:{command:"...", ...}
+	//   tool_call_update — status:"completed",   rawInput:{...}
+	// We emit one ProgressEvent per tool call on the FIRST "in_progress"
+	// tool_call_update, when rawInput is populated. The gate on seenToolCalls
+	// prevents duplicate events for subsequent updates to the same call.
+	if u := payload.Update; u.SessionUpdate == "tool_call_update" && u.Status == "in_progress" && u.ToolCallID != "" {
+		r.mu.Lock()
+		seen := r.seenToolCalls != nil && r.seenToolCalls[u.ToolCallID]
+		if !seen && r.seenToolCalls != nil {
+			r.seenToolCalls[u.ToolCallID] = true
+		}
+		r.mu.Unlock()
+		if !seen {
+			tool := u.Title
+			if tool == "" {
+				tool = u.Kind
+			}
+			if tool != "" {
+				r.dispatchProgress(agent.ProgressEvent{
+					Kind:   "tool",
+					Tool:   tool,
+					Target: agent.TargetFromInput(tool, u.RawInput),
+				})
+			}
+		}
+	}
+
 	if payload.Item.Type != "" {
 		r.dispatchPromptEvent(sessionID, payload.Item.Type, payload.Item.Text, payload.Item.Delta, payload.Item.Completed)
 	}
 
 	for _, item := range payload.ContentItems {
 		r.dispatchPromptEvent(sessionID, item.Type, item.Text, item.Delta, item.Completed)
+	}
+}
+
+// dispatchProgress calls the per-turn progress callback (if any) under the lock.
+func (r *ACPRuntime) dispatchProgress(ev agent.ProgressEvent) {
+	r.mu.Lock()
+	fn := r.activeProgress
+	r.mu.Unlock()
+	if fn != nil {
+		fn(ev)
 	}
 }
 
