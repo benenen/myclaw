@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,6 +247,35 @@ func TestBuildACPArgsNoResumeWhenEmpty(t *testing.T) {
 	got := buildACPArgs("claude", nil, false, "")
 	if strings.Contains(strings.Join(got, " "), "--resume") {
 		t.Fatalf("did not expect --resume, got %v", got)
+	}
+}
+
+func TestReadLoop_EmitsToolUseProgress(t *testing.T) {
+	var got []agent.ProgressEvent
+	var mu sync.Mutex
+	r := &ACPRuntime{activeProgress: func(ev agent.ProgressEvent) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}}
+
+	line := `{"type":"assistant","message":{"content":[` +
+		`{"type":"text","text":"working"},` +
+		`{"type":"tool_use","name":"Bash","input":{"command":"boo ls"}},` +
+		`{"type":"tool_use","name":"Read","input":{"file_path":"internal/api.go"}}]}}`
+
+	r.handleLine(line)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2: %+v", len(got), got)
+	}
+	if got[0].Tool != "Bash" || got[0].Target != "boo ls" {
+		t.Fatalf("event0 = %+v", got[0])
+	}
+	if got[1].Tool != "Read" || got[1].Target != "internal/api.go" {
+		t.Fatalf("event1 = %+v", got[1])
 	}
 }
 
