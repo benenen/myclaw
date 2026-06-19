@@ -72,6 +72,7 @@ func New(cfg config.Config) (*App, error) {
 	botRepo := repositories.NewBotRepository(db)
 	capabilityRepo := repositories.NewAgentCapabilityRepository(db)
 	registeredAgentRepo := repositories.NewRegisteredAgentRepository(db)
+	botCLISessionRepo := repositories.NewBotCLISessionRepository(db)
 
 	wechatCfg := wechat.LoadConfig()
 	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
@@ -98,7 +99,7 @@ func New(cfg config.Config) (*App, error) {
 	multiReplyGateway.Register("feishu", feishuReplyGateway)
 
 	executor := agent.NewManager()
-	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, bot.BotCLIResolverConfig{
+	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, botCLISessionRepo, bot.BotCLIResolverConfig{
 		Timeout:             botCLITimeout,
 		WorkspaceRoot:       cfg.BotWorkspaceRoot(),
 		SQLitePath:          cfg.SQLitePath,
@@ -106,7 +107,7 @@ func New(cfg config.Config) (*App, error) {
 		MCPURL:              cfg.MCPURL,
 		OrchestratorPrompt:  orchestration.OrchestratorPrompt(),
 	})
-	orchestrator := bot.NewBotMessageOrchestrator(executor, multiReplyGateway, resolver)
+	orchestrator := bot.NewBotMessageOrchestrator(executor, multiReplyGateway, resolver, botCLISessionRepo)
 
 	taskStore := orchestration.NewTaskStore()
 	localRunner := orchestration.NewLocalRunner(resolver, executor)
@@ -118,6 +119,7 @@ func New(cfg config.Config) (*App, error) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
 	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, multiProvider, botManager)
+	botSvc.SetWorkspaceRoot(cfg.BotWorkspaceRoot())
 	discoverer := capability.NewAgentCapabilityDiscoverer(capabilityRepo, nil)
 	botSvc.SetCapabilityDiscoverer(discoverer)
 

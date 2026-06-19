@@ -10,6 +10,7 @@ import (
 
 	"github.com/benenen/myclaw/internal/agent"
 	"github.com/benenen/myclaw/internal/channel"
+	"github.com/benenen/myclaw/internal/domain"
 )
 
 const (
@@ -72,19 +73,21 @@ type BotMessageOrchestrator struct {
 	executor          executor
 	replies           replyGateway
 	resolver          specResolver
+	sessions          domain.BotCLISessionRepository
 	messageContext    func(context.Context) context.Context
 	workerIdleTime    time.Duration
 	processingTimeout time.Duration
 	replyTimeout      time.Duration
 }
 
-func NewBotMessageOrchestrator(executor executor, replies replyGateway, resolver specResolver) *BotMessageOrchestrator {
+func NewBotMessageOrchestrator(executor executor, replies replyGateway, resolver specResolver, sessions domain.BotCLISessionRepository) *BotMessageOrchestrator {
 	return &BotMessageOrchestrator{
 		bots:              make(map[string]*botState),
 		seen:              make(map[string]seenMessageState),
 		executor:          executor,
 		replies:           replies,
 		resolver:          resolver,
+		sessions:          sessions,
 		workerIdleTime:    workerIdleTimeout,
 		processingTimeout: processingTimeout,
 		replyTimeout:      replyTimeout,
@@ -329,6 +332,16 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 		return
 	}
 
+	if o.sessions != nil && strings.TrimSpace(result.resp.SessionID) != "" && result.resp.SessionID != spec.ResumeSessionID {
+		if err := o.sessions.Upsert(context.WithoutCancel(ctx), domain.BotCLISession{
+			BotID:     msg.BotID,
+			CLIType:   result.resp.RuntimeType,
+			SessionID: result.resp.SessionID,
+			WorkDir:   spec.WorkDir,
+		}); err != nil {
+			log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, result.resp.RuntimeType, err)
+		}
+	}
 	o.replyWithTimeout(ctx, msg, result.resp)
 	o.finishMessageEventually(msg, true)
 }
@@ -361,6 +374,16 @@ func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMe
 			o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
 			o.finishMessageEventually(msg, false)
 			return
+		}
+		if o.sessions != nil && strings.TrimSpace(resp.SessionID) != "" && resp.SessionID != spec.ResumeSessionID {
+			if err := o.sessions.Upsert(context.WithoutCancel(ctx), domain.BotCLISession{
+				BotID:     msg.BotID,
+				CLIType:   resp.RuntimeType,
+				SessionID: resp.SessionID,
+				WorkDir:   spec.WorkDir,
+			}); err != nil {
+				log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, resp.RuntimeType, err)
+			}
 		}
 		o.replyWithTimeout(ctx, msg, resp)
 		o.finishMessageEventually(msg, true)

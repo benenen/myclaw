@@ -30,6 +30,10 @@ type Spec struct {
 	// basename isn't the canonical name (e.g. an operator alias like "cx"
 	// for codex), so drivers still inject real-binary args.
 	RealCLI bool
+	// ResumeSessionID, when non-empty, asks the driver to resume that prior CLI
+	// session instead of starting fresh. Best-effort: drivers fall back to a new
+	// session if the CLI rejects it.
+	ResumeSessionID string
 }
 
 type Request struct {
@@ -47,4 +51,7 @@ type Response struct {
 	ExitCode    int
 	Duration    time.Duration
 	RawOutput   string
+	// SessionID is the CLI's native session id for this turn, surfaced so the
+	// orchestrator can persist it per (bot, cli) for later resume.
+	SessionID string
 }

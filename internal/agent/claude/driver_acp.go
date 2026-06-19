@@ -49,8 +49,16 @@ type ACPRuntime struct {
 	state     runtimeState
 	readErr   error
 	closeOnce sync.Once
+	sessionID string
 
 	activeTurnCh chan acpTurnEvent
+}
+
+// getSessionID returns the session id captured from the claude init event.
+func (r *ACPRuntime) getSessionID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionID
 }
 
 // acpTurnEvent carries one piece of progress for the in-flight turn from the
@@ -91,7 +99,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		return nil, fmt.Errorf("claude acp driver requires command")
 	}
 
-	acpArgs := buildACPArgs(spec.Command, spec.Args, spec.RealCLI)
+	acpArgs := buildACPArgs(spec.Command, spec.Args, spec.RealCLI, spec.ResumeSessionID)
 	slog.Info("agent cli launching", "bot_id", spec.BotID, "runtime", runtimeTypeClaude, "command", spec.Command, "args", agent.SummarizeArgs(acpArgs), "real_cli", spec.RealCLI)
 	cmd := exec.CommandContext(ctx, spec.Command, acpArgs...)
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
@@ -213,6 +221,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					ExitCode:    1,
 					Duration:    time.Since(start),
 					RawOutput:   text,
+					SessionID:   r.getSessionID(),
 				}, err
 			}
 			r.mu.Lock()
@@ -227,6 +236,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 				ExitCode:    0,
 				Duration:    time.Since(start),
 				RawOutput:   text,
+				SessionID:   r.getSessionID(),
 			}, nil
 		}
 	}
@@ -313,6 +323,12 @@ func (r *ACPRuntime) readLoop(scanner *bufio.Scanner) {
 			continue
 		}
 
+		if evt.Type == "system" && evt.Subtype == "init" && evt.SessionID != "" {
+			r.mu.Lock()
+			r.sessionID = evt.SessionID
+			r.mu.Unlock()
+		}
+
 		if evt.Type == "result" {
 			r.dispatchTurnEvent(acpTurnEvent{
 				done:    true,
@@ -367,7 +383,8 @@ func isClaudeCommand(command string) bool {
 // buildACPArgs assembles the flags required for a persistent stream-json
 // session, appending any operator-supplied args. The required flags are only
 // injected for the real claude binary so test stubs receive their args verbatim.
-func buildACPArgs(command string, extra []string, realCLI bool) []string {
+// When resumeSessionID is non-empty the real-binary path appends --resume <id>.
+func buildACPArgs(command string, extra []string, realCLI bool, resumeSessionID string) []string {
 	if !isClaudeCommand(command) && !realCLI {
 		return append([]string(nil), extra...)
 	}
@@ -377,6 +394,9 @@ func buildACPArgs(command string, extra []string, realCLI bool) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--dangerously-skip-permissions",
+	}
+	if resumeSessionID != "" {
+		args = append(args, "--resume", resumeSessionID)
 	}
 	return append(args, extra...)
 }

@@ -100,6 +100,114 @@ func TestACPRuntimeRunUsesOpencodeACPProtocol(t *testing.T) {
 	if !strings.Contains(string(logData), `"text":"hello"`) || !strings.Contains(string(logData), `"text":"world"`) {
 		t.Fatalf("log missing prompt texts: %s", string(logData))
 	}
+
+	// The session id created by session/new (session-1) must be surfaced on
+	// every completed turn so the orchestrator can persist it for later reuse.
+	if first.SessionID != "session-1" {
+		t.Fatalf("first Run() SessionID = %q, want session-1", first.SessionID)
+	}
+	if second.SessionID != "session-1" {
+		t.Fatalf("second Run() SessionID = %q, want session-1", second.SessionID)
+	}
+}
+
+func TestACPRuntimeReusesResumedSession(t *testing.T) {
+	workDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acp-reuse.log")
+
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessOpencodeACP", "--", "acp-success"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         logPath,
+		},
+		WorkDir:         workDir,
+		Timeout:         2 * time.Second,
+		ResumeSessionID: "sess_prior",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runtime.Close()
+	})
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "again", WorkDir: workDir})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "reply:again" {
+		t.Fatalf("Run() text = %q", resp.Text)
+	}
+	// The adopted resume id is used directly; no session/new round trip.
+	if resp.SessionID != "sess_prior" {
+		t.Fatalf("Run() SessionID = %q, want sess_prior", resp.SessionID)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if got := countACPMethod(lines, "session/new"); got != 0 {
+		t.Fatalf("session/new count = %d, want 0 (adopted resume should skip new)", got)
+	}
+	if !strings.Contains(string(logData), `"sessionId":"sess_prior"`) {
+		t.Fatalf("log missing reused session id: %s", string(logData))
+	}
+}
+
+func TestACPRuntimeRecoversWhenReusedSessionRejected(t *testing.T) {
+	workDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "acp-reuse-reject.log")
+
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessOpencodeACP", "--", "acp-reject-reused"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         logPath,
+		},
+		WorkDir:         workDir,
+		Timeout:         2 * time.Second,
+		ResumeSessionID: "sess_gone",
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runtime.Close()
+	})
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "recover", WorkDir: workDir})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Text != "reply:recover" {
+		t.Fatalf("Run() text = %q", resp.Text)
+	}
+	// The reused id was rejected; the driver recovered via session/new and must
+	// surface the freshly created id.
+	if resp.SessionID != "session-1" {
+		t.Fatalf("Run() SessionID = %q, want session-1 (recovered session)", resp.SessionID)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	if got := countACPMethod(lines, "session/new"); got != 1 {
+		t.Fatalf("session/new count = %d, want 1 (recover after rejected reuse)", got)
+	}
+	if got := countACPMethod(lines, "session/prompt"); got != 2 {
+		t.Fatalf("session/prompt count = %d, want 2 (initial reject + retry)", got)
+	}
 }
 
 func countACPMethod(lines []string, method string) int {
@@ -124,7 +232,7 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 			mode = args[i+1]
 		}
 	}
-	if mode != "acp-success" {
+	if mode != "acp-success" && mode != "acp-reject-reused" {
 		os.Exit(2)
 	}
 
@@ -141,6 +249,10 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 	sessionCount := 0
 	promptCount := 0
 	currentPrompt := ""
+	// known tracks session ids the fake itself created via session/new. In
+	// acp-reject-reused mode a prompt for an unknown (adopted) id is rejected so
+	// the driver must recover via session/new and retry.
+	known := map[string]bool{}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -166,8 +278,8 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 				"result": map[string]any{
 					"serverInfo": map[string]any{"name": "opencode-acp", "version": "test"},
 					"capabilities": map[string]any{
-						"session/prompt":       true,
-						"session/new":          true,
+						"session/prompt":            true,
+						"session/new":               true,
 						"session/requestPermission": true,
 					},
 				},
@@ -180,6 +292,7 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 		case "session/new":
 			sessionCount++
 			sessionID = fmt.Sprintf("session-%d", sessionCount)
+			known[sessionID] = true
 			writeACPJSON(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      id,
@@ -191,10 +304,17 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 			promptCount++
 			params, _ := msg["params"].(map[string]any)
 			gotSessionID, _ := params["sessionId"].(string)
-			if gotSessionID != sessionID {
-				fmt.Fprintf(os.Stderr, "unexpected session id: %q want %q", gotSessionID, sessionID)
-				os.Exit(6)
+			if mode == "acp-reject-reused" && !known[gotSessionID] {
+				// Adopted resume id the server does not recognize.
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32602, "message": "unknown session id"},
+				})
+				continue
 			}
+			// In acp-success mode an adopted resume id is accepted as-is.
+			sessionID = gotSessionID
 			currentPrompt, _ = params["text"].(string)
 
 			writeACPJSON(map[string]any{
@@ -211,8 +331,8 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 				"params": map[string]any{
 					"sessionId": sessionID,
 					"contentItem": map[string]any{
-						"type": "text",
-						"text": "reply:" + currentPrompt,
+						"type":      "text",
+						"text":      "reply:" + currentPrompt,
 						"completed": true,
 					},
 				},

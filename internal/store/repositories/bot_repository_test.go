@@ -315,6 +315,25 @@ func TestBotRepositoryPreservesCLIAlias(t *testing.T) {
 	}
 }
 
+func TestBotRepositoryPreservesWorkspace(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+	if _, err := repo.Create(ctx, domain.Bot{
+		ID: "bot_ws_1", UserID: "usr_1", Name: "ws-bot", ChannelType: "wechat",
+		ConnectionStatus: domain.BotConnectionStatusLoginRequired, Workspace: "/data/bots/bot_ws_1/workspace",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetByID(ctx, "bot_ws_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Workspace != "/data/bots/bot_ws_1/workspace" {
+		t.Fatalf("Workspace = %q", got.Workspace)
+	}
+}
+
 func TestBotRepositoryDeleteByID(t *testing.T) {
 	db := testutil.OpenTestDB(t)
 	repo := NewBotRepository(db)

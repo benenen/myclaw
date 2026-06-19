@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +33,7 @@ type BotCLIResolverConfig struct {
 type BotCLIResolver struct {
 	bots                domain.BotRepository
 	capabilities        domain.AgentCapabilityRepository
+	sessions            domain.BotCLISessionRepository
 	timeout             time.Duration
 	workspaceRoot       string
 	sqlitePath          string
@@ -40,10 +42,11 @@ type BotCLIResolver struct {
 	orchestratorPrompt  string
 }
 
-func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapabilityRepository, cfg BotCLIResolverConfig) *BotCLIResolver {
+func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapabilityRepository, sessions domain.BotCLISessionRepository, cfg BotCLIResolverConfig) *BotCLIResolver {
 	return &BotCLIResolver{
 		bots:                bots,
 		capabilities:        capabilities,
+		sessions:            sessions,
 		timeout:             cfg.Timeout,
 		workspaceRoot:       cfg.WorkspaceRoot,
 		sqlitePath:          cfg.SQLitePath,
@@ -94,10 +97,22 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		SQLitePath: r.sqlitePath,
 		RealCLI:    alias != "",
 	}
-	if r.workspaceRoot != "" {
-		spec.WorkDir = filepath.Join(r.workspaceRoot, botID, "workspace")
+	workDir := strings.TrimSpace(bot.Workspace)
+	if workDir == "" && r.workspaceRoot != "" {
+		workDir = filepath.Join(r.workspaceRoot, botID, "workspace")
+	}
+	if workDir != "" {
+		spec.WorkDir = workDir
 		if err := os.MkdirAll(spec.WorkDir, 0o755); err != nil {
 			return agent.Spec{}, err
+		}
+	}
+	if r.sessions != nil {
+		if stored, err := r.sessions.Get(ctx, botID, capability.Key); err == nil {
+			spec.ResumeSessionID = stored.SessionID
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			// non-fatal: log and continue with no resume
+			log.Printf("cli session lookup failed: bot_id=%s cli=%s error=%v", botID, capability.Key, err)
 		}
 	}
 	if bot.Role == domain.BotRoleOrchestrator {

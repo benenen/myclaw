@@ -45,6 +45,14 @@ type ACPRuntime struct {
 	activeTurnCh  chan acpTurnEvent
 }
 
+// getThreadID returns the codex conversation/thread id captured from
+// thread/start or thread/resume, guarded by the runtime mutex.
+func (r *ACPRuntime) getThreadID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.threadID
+}
+
 type acpRPCRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	ID      int64       `json:"id"`
@@ -279,6 +287,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					RuntimeType: runtimeTypeCodex,
 					ExitCode:    0,
 					RawOutput:   text,
+					SessionID:   r.getThreadID(),
 				}, nil
 			}
 		}
@@ -355,10 +364,21 @@ func (r *ACPRuntime) ensureThread(ctx context.Context, workDir string) (string, 
 	r.mu.Lock()
 	threadID := r.threadID
 	threadWorkDir := r.threadWorkDir
+	resumeID := strings.TrimSpace(r.spec.ResumeSessionID)
 	r.mu.Unlock()
 
 	if threadID != "" && threadWorkDir == workDir {
 		return threadID, nil
+	}
+
+	// Best-effort resume: when the resolver supplied a prior thread id and we
+	// have no live thread yet, ask the codex app-server to reopen it via
+	// thread/resume (response shape matches thread/start). On any failure we
+	// fall through to a fresh thread/start so a turn never fails on resume.
+	if threadID == "" && resumeID != "" {
+		if resumed, ok := r.tryResumeThread(ctx, resumeID, workDir); ok {
+			return resumed, nil
+		}
 	}
 
 	params := map[string]any{
@@ -371,22 +391,55 @@ func (r *ACPRuntime) ensureThread(ctx context.Context, workDir string) (string, 
 		return "", err
 	}
 
+	id, err := decodeThreadID(result, "thread/start")
+	if err != nil {
+		return "", err
+	}
+
+	r.mu.Lock()
+	r.threadID = id
+	r.threadWorkDir = workDir
+	r.mu.Unlock()
+	return id, nil
+}
+
+// tryResumeThread reopens a prior conversation by id. It returns the resumed
+// thread id and true on success; on any error it returns false so the caller
+// starts a fresh thread instead.
+func (r *ACPRuntime) tryResumeThread(ctx context.Context, resumeID, workDir string) (string, bool) {
+	result, err := r.rpc(ctx, "thread/resume", map[string]any{
+		"threadId": resumeID,
+	})
+	if err != nil {
+		slog.Warn("codex acp thread/resume failed; starting fresh", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "thread_id", resumeID, "error", err)
+		return "", false
+	}
+	id, err := decodeThreadID(result, "thread/resume")
+	if err != nil || id == "" {
+		slog.Warn("codex acp thread/resume returned no thread id; starting fresh", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "thread_id", resumeID, "error", err)
+		return "", false
+	}
+
+	r.mu.Lock()
+	r.threadID = id
+	r.threadWorkDir = workDir
+	r.mu.Unlock()
+	slog.Info("codex acp resumed thread", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "thread_id", id)
+	return id, true
+}
+
+func decodeThreadID(result json.RawMessage, method string) (string, error) {
 	var threadResult struct {
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
 	if err := json.Unmarshal(result, &threadResult); err != nil {
-		return "", fmt.Errorf("decode codex acp thread/start result: %w", err)
+		return "", fmt.Errorf("decode codex acp %s result: %w", method, err)
 	}
 	if threadResult.Thread.ID == "" {
-		return "", fmt.Errorf("codex acp thread/start returned empty thread id")
+		return "", fmt.Errorf("codex acp %s returned empty thread id", method)
 	}
-
-	r.mu.Lock()
-	r.threadID = threadResult.Thread.ID
-	r.threadWorkDir = workDir
-	r.mu.Unlock()
 	return threadResult.Thread.ID, nil
 }
 

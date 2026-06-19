@@ -221,15 +221,57 @@ func writeStreamJSON(v map[string]any) {
 }
 
 func TestBuildACPArgsInjectsForAliasedRealCLI(t *testing.T) {
-	got := buildACPArgs("cl", nil, true)
+	got := buildACPArgs("cl", nil, true, "")
 	if len(got) == 0 || got[0] != "-p" {
 		t.Fatalf("expected -p injected for realCLI alias, got %v", got)
 	}
 }
 
 func TestBuildACPArgsSkipsForStubWhenNotRealCLI(t *testing.T) {
-	got := buildACPArgs("/tmp/fake-claude", []string{"x"}, false)
+	got := buildACPArgs("/tmp/fake-claude", []string{"x"}, false, "")
 	if len(got) != 1 || got[0] != "x" {
 		t.Fatalf("expected verbatim args for stub, got %v", got)
+	}
+}
+
+func TestBuildACPArgsAddsResumeWhenSet(t *testing.T) {
+	got := buildACPArgs("claude", nil, false, "sess_abc")
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--resume sess_abc") {
+		t.Fatalf("expected --resume sess_abc, got %v", got)
+	}
+}
+
+func TestBuildACPArgsNoResumeWhenEmpty(t *testing.T) {
+	got := buildACPArgs("claude", nil, false, "")
+	if strings.Contains(strings.Join(got, " "), "--resume") {
+		t.Fatalf("did not expect --resume, got %v", got)
+	}
+}
+
+func TestACPRuntimeCapturesSessionID(t *testing.T) {
+	driver := NewACPDriver()
+	runtime, err := driver.Init(context.Background(), agent.Spec{
+		Type:    acpDriverName,
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcessClaudeACP", "--", "claude-stream"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"MYCLAW_ACP_LOG":         filepath.Join(t.TempDir(), "acp.log"),
+		},
+		WorkDir: t.TempDir(),
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Init() error = %v", err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	resp, err := runtime.Run(context.Background(), agent.Request{Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.SessionID != "test-session" {
+		t.Fatalf("SessionID = %q, want test-session", resp.SessionID)
 	}
 }

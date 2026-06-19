@@ -30,7 +30,7 @@ func TestResolveOrchestratorInjectsMCPAndPrompt(t *testing.T) {
 			Available:      true,
 		},
 	}}
-	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
 		Timeout:             time.Minute,
 		OrchestratorTimeout: 25 * time.Minute,
 		MCPURL:              "http://127.0.0.1:8080/mcp",
@@ -72,7 +72,7 @@ func TestBotCLIResolverResolveReturnsConfigForConfiguredAvailableCapability(t *t
 			Available:      true,
 		},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{Timeout: 45 * time.Second})
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{Timeout: 45 * time.Second})
 
 	spec, err := resolver.Resolve(context.Background(), "bot_1")
 	if err != nil {
@@ -122,7 +122,7 @@ func TestBotCLIResolverResolveAssignsAndCreatesBotWorkspace(t *testing.T) {
 			Available:      true,
 		},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
 		Timeout:       45 * time.Second,
 		WorkspaceRoot: workspaceRoot,
 	})
@@ -160,7 +160,7 @@ func TestBotCLIResolverResolveAssignsSQLitePath(t *testing.T) {
 			Available:      true,
 		},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
 		Timeout:    45 * time.Second,
 		SQLitePath: "/tmp/myclaw/myclaw.db",
 	})
@@ -188,7 +188,7 @@ func TestBotCLIResolverResolveUsesDedicatedCodexExecTimeout(t *testing.T) {
 			Available:      true,
 		},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
 		Timeout: 45 * time.Second,
 	})
 
@@ -202,7 +202,7 @@ func TestBotCLIResolverResolveUsesDedicatedCodexExecTimeout(t *testing.T) {
 }
 
 func TestBotCLIResolverResolveReturnsConfigMissingWhenCapabilityMissing(t *testing.T) {
-	resolver := NewBotCLIResolver(newBotRepoStub(domain.Bot{ID: "bot_1"}), &agentCapabilityRepoStub{}, BotCLIResolverConfig{})
+	resolver := NewBotCLIResolver(newBotRepoStub(domain.Bot{ID: "bot_1"}), &agentCapabilityRepoStub{}, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	_, err := resolver.Resolve(context.Background(), "bot_1")
 	if !errors.Is(err, ErrBotCLIConfigMissing) {
@@ -215,7 +215,7 @@ func TestBotCLIResolverResolveReturnsUnavailableWhenCapabilityUnavailable(t *tes
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_claude": {ID: "cap_claude", Available: false, SupportedModes: []string{"codex-exec"}},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	_, err := resolver.Resolve(context.Background(), "bot_1")
 	if !errors.Is(err, ErrBotCLIUnavailable) {
@@ -228,7 +228,7 @@ func TestBotCLIResolverResolveReturnsUnsupportedModeWhenCapabilityDoesNotSupport
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_claude": {ID: "cap_claude", Available: true, SupportedModes: []string{"codex-exec"}},
 	}}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	_, err := resolver.Resolve(context.Background(), "bot_1")
 	if !errors.Is(err, ErrBotCLIUnsupportedMode) {
@@ -239,7 +239,7 @@ func TestBotCLIResolverResolveReturnsUnsupportedModeWhenCapabilityDoesNotSupport
 func TestBotCLIResolverResolveReturnsCapabilityLookupError(t *testing.T) {
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", AgentCapabilityID: "cap_codex", AgentMode: "codex-exec"})
 	capabilities := &agentCapabilityRepoStub{getByIDErr: errors.New("lookup failed")}
-	resolver := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	resolver := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	_, err := resolver.Resolve(context.Background(), "bot_1")
 	if err == nil || err.Error() != "lookup failed" {
@@ -256,7 +256,7 @@ func TestResolveAliasOverridesCommandAndBypassesAvailability(t *testing.T) {
 		// NOT available and canonical command — alias must bypass the gate.
 		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
 	}}
-	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	spec, err := r.Resolve(context.Background(), "bot_alias")
 	if err != nil {
@@ -277,7 +277,7 @@ func TestResolveNoAliasKeepsDefaultAndUnavailableErrors(t *testing.T) {
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
 	}}
-	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	if _, err := r.Resolve(context.Background(), "bot_noalias"); !errors.Is(err, ErrBotCLIUnavailable) {
 		t.Fatalf("no alias + unavailable should error ErrBotCLIUnavailable, got %v", err)
@@ -292,9 +292,100 @@ func TestResolveAliasStillValidatesMode(t *testing.T) {
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"acp"}, Available: false},
 	}}
-	r := NewBotCLIResolver(bots, capabilities, BotCLIResolverConfig{})
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
 
 	if _, err := r.Resolve(context.Background(), "bot_alias_badmode"); !errors.Is(err, ErrBotCLIUnsupportedMode) {
 		t.Fatalf("alias set but unsupported mode should return ErrBotCLIUnsupportedMode, got %v", err)
+	}
+}
+
+func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_w", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp",
+		Workspace: "/custom/ws",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_w")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec.WorkDir != "/custom/ws" {
+		t.Fatalf("WorkDir = %q, want /custom/ws", spec.WorkDir)
+	}
+}
+
+type agentSessionRepoStub struct {
+	byKey map[string]domain.BotCLISession // key = botID + "|" + cliType
+}
+
+func (s *agentSessionRepoStub) Upsert(_ context.Context, sess domain.BotCLISession) error {
+	if s.byKey == nil {
+		s.byKey = map[string]domain.BotCLISession{}
+	}
+	s.byKey[sess.BotID+"|"+sess.CLIType] = sess
+	return nil
+}
+func (s *agentSessionRepoStub) Get(_ context.Context, botID, cliType string) (domain.BotCLISession, error) {
+	if v, ok := s.byKey[botID+"|"+cliType]; ok {
+		return v, nil
+	}
+	return domain.BotCLISession{}, domain.ErrNotFound
+}
+
+func TestResolveSetsResumeSessionFromStore(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{ID: "bot_s", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp"})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	sessions := &agentSessionRepoStub{byKey: map[string]domain.BotCLISession{
+		"bot_s|codex": {BotID: "bot_s", CLIType: "codex", SessionID: "conv_42"},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, sessions, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_s")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec.ResumeSessionID != "conv_42" {
+		t.Fatalf("ResumeSessionID = %q, want conv_42", spec.ResumeSessionID)
+	}
+}
+
+func TestResolveNoStoredSessionLeavesResumeEmpty(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{ID: "bot_n", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp"})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_n")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec.ResumeSessionID != "" {
+		t.Fatalf("ResumeSessionID = %q, want empty", spec.ResumeSessionID)
+	}
+}
+
+type erroringSessionRepoStub struct{}
+
+func (erroringSessionRepoStub) Upsert(context.Context, domain.BotCLISession) error { return nil }
+func (erroringSessionRepoStub) Get(context.Context, string, string) (domain.BotCLISession, error) {
+	return domain.BotCLISession{}, errors.New("db down")
+}
+
+func TestResolveSessionLookupErrorIsNonFatal(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{ID: "bot_e", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp"})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, erroringSessionRepoStub{}, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_e")
+	if err != nil {
+		t.Fatalf("session lookup error must be non-fatal, got %v", err)
+	}
+	if spec.ResumeSessionID != "" {
+		t.Fatalf("ResumeSessionID = %q, want empty on lookup error", spec.ResumeSessionID)
 	}
 }
