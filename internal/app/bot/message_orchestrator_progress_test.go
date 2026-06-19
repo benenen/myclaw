@@ -163,3 +163,36 @@ func TestOrchestrator_NilReporter_BehavesAsToday(t *testing.T) {
 		t.Fatalf("answer = %q", resp.Text)
 	}
 }
+
+func TestOrchestrator_OrchestratorBot_AckFailureFallsBackToText(t *testing.T) {
+	sess := &fakeProgressSession{ackErr: context.DeadlineExceeded}
+	replied := make(chan agent.Response, 4)
+	gateway := fakeReplyGateway{reply: func(_ context.Context, _ channel.ReplyTarget, resp agent.Response) error {
+		replied <- resp
+		return nil
+	}}
+	exec := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
+		if req.OnProgress != nil {
+			t.Error("OnProgress must be nil after Ack failure (session disabled)")
+		}
+		return agent.Response{Text: "answer"}, nil
+	}}
+	o := NewBotMessageOrchestrator(exec, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
+		return agent.Spec{Type: "codex-exec", Command: "codex", Orchestrator: true}, nil
+	}}, nil)
+	o.SetProgressReporter(&fakeProgressReporter{sess: sess})
+
+	o.HandleMessage(context.Background(), feishuInbound("hello"))
+
+	// Ack failed → text ack fallback first, then the answer.
+	if first := waitReply(t, replied); first.Text != ackReply {
+		t.Fatalf("first reply = %q, want text ack %q", first.Text, ackReply)
+	}
+	if second := waitReply(t, replied); second.Text != "answer" {
+		t.Fatalf("second reply = %q, want answer", second.Text)
+	}
+	c := sess.counts()
+	if c.ack != 1 || c.done != 0 || c.steps != 0 {
+		t.Fatalf("counts = %+v, want ack:1 done:0 steps:0", c)
+	}
+}
