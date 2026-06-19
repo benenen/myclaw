@@ -66,7 +66,7 @@ func buildProgressCard(st traceState) string {
 
 	steps := st.steps
 	if len(steps) > maxTraceLines {
-		b.WriteString(fmt.Sprintf("\n…(+%d 步)", len(steps)-maxTraceLines))
+		fmt.Fprintf(&b, "\n…(+%d 步)", len(steps)-maxTraceLines)
 		steps = steps[len(steps)-maxTraceLines:]
 	}
 	for _, s := range steps {

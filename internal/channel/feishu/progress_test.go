@@ -60,6 +60,13 @@ func TestBuildProgressCard_Fail(t *testing.T) {
 	}
 }
 
+func TestBuildProgressCard_FailBlankReason(t *testing.T) {
+	md := markdownContent(t, buildProgressCard(traceState{terminal: "fail"}))
+	if !strings.Contains(md, "⚠️ 失败") || strings.Contains(md, "：") {
+		t.Fatalf("blank-reason fail header should be bare '⚠️ 失败': %s", md)
+	}
+}
+
 func TestBuildProgressCard_CapsToLast25(t *testing.T) {
 	var steps []traceStep
 	for i := 0; i < 30; i++ {
