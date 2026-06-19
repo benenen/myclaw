@@ -51,7 +51,8 @@ type ACPRuntime struct {
 	closeOnce sync.Once
 	sessionID string
 
-	activeTurnCh chan acpTurnEvent
+	activeTurnCh   chan acpTurnEvent
+	activeProgress func(agent.ProgressEvent)
 }
 
 // getSessionID returns the session id captured from the claude init event.
@@ -77,6 +78,13 @@ type claudeStreamEvent struct {
 	IsError   bool   `json:"is_error"`
 	Result    string `json:"result"`
 	SessionID string `json:"session_id"`
+	Message   *struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		} `json:"content"`
+	} `json:"message,omitempty"`
 }
 
 func init() {
@@ -161,11 +169,13 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	r.state = stateRunning
 	turnCh := make(chan acpTurnEvent, 256)
 	r.activeTurnCh = turnCh
+	r.activeProgress = req.OnProgress
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		if r.activeTurnCh == turnCh {
 			r.activeTurnCh = nil
+			r.activeProgress = nil
 		}
 		r.mu.Unlock()
 	}()
@@ -317,25 +327,7 @@ func (r *ACPRuntime) readLoop(scanner *bufio.Scanner) {
 		if line == "" {
 			continue
 		}
-
-		var evt claudeStreamEvent
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			continue
-		}
-
-		if evt.Type == "system" && evt.Subtype == "init" && evt.SessionID != "" {
-			r.mu.Lock()
-			r.sessionID = evt.SessionID
-			r.mu.Unlock()
-		}
-
-		if evt.Type == "result" {
-			r.dispatchTurnEvent(acpTurnEvent{
-				done:    true,
-				text:    evt.Result,
-				isError: evt.IsError,
-			})
-		}
+		r.handleLine(line)
 	}
 
 	err := scanner.Err()
@@ -349,6 +341,51 @@ func (r *ACPRuntime) readLoop(scanner *bufio.Scanner) {
 	}
 	r.markBroken(err)
 	r.dispatchTurnEvent(acpTurnEvent{err: err})
+}
+
+func (r *ACPRuntime) handleLine(line string) {
+	var evt claudeStreamEvent
+	if err := json.Unmarshal([]byte(line), &evt); err != nil {
+		return
+	}
+
+	if evt.Type == "system" && evt.Subtype == "init" && evt.SessionID != "" {
+		r.mu.Lock()
+		r.sessionID = evt.SessionID
+		r.mu.Unlock()
+	}
+
+	if evt.Type == "assistant" && evt.Message != nil {
+		for _, blk := range evt.Message.Content {
+			if blk.Type != "tool_use" || blk.Name == "" {
+				continue
+			}
+			var input map[string]any
+			_ = json.Unmarshal(blk.Input, &input)
+			r.dispatchProgress(agent.ProgressEvent{
+				Kind:   "tool",
+				Tool:   blk.Name,
+				Target: agent.TargetFromInput(blk.Name, input),
+			})
+		}
+	}
+
+	if evt.Type == "result" {
+		r.dispatchTurnEvent(acpTurnEvent{
+			done:    true,
+			text:    evt.Result,
+			isError: evt.IsError,
+		})
+	}
+}
+
+func (r *ACPRuntime) dispatchProgress(ev agent.ProgressEvent) {
+	r.mu.Lock()
+	fn := r.activeProgress
+	r.mu.Unlock()
+	if fn != nil {
+		fn(ev)
+	}
 }
 
 func (r *ACPRuntime) dispatchTurnEvent(evt acpTurnEvent) {

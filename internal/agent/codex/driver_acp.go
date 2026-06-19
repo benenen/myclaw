@@ -39,10 +39,11 @@ type ACPRuntime struct {
 	nextID  atomic.Int64
 	pending map[int64]chan acpRPCResponse
 
-	threadID      string
-	threadWorkDir string
-	activeThread  string
-	activeTurnCh  chan acpTurnEvent
+	threadID       string
+	threadWorkDir  string
+	activeThread   string
+	activeTurnCh   chan acpTurnEvent
+	activeProgress func(agent.ProgressEvent)
 }
 
 // getThreadID returns the codex conversation/thread id captured from
@@ -218,12 +219,14 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	r.mu.Lock()
 	r.activeThread = threadID
 	r.activeTurnCh = turnCh
+	r.activeProgress = req.OnProgress
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		if r.activeTurnCh == turnCh {
 			r.activeTurnCh = nil
 			r.activeThread = ""
+			r.activeProgress = nil
 		}
 		r.mu.Unlock()
 	}()
@@ -526,7 +529,6 @@ func (r *ACPRuntime) readLoop() {
 		if line == "" {
 			continue
 		}
-
 		var msg acpRPCResponse
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			continue
@@ -634,25 +636,71 @@ func (r *ACPRuntime) handleItemDelta(params json.RawMessage) {
 
 func (r *ACPRuntime) handleItemStarted(params json.RawMessage) {
 	var payload struct {
-		ThreadID string `json:"threadId"`
-		Item     struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"item"`
+		ThreadID string          `json:"threadId"`
+		Item     json.RawMessage `json:"item"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
 		return
 	}
-	if payload.Item.Type != "agentMessage" {
+	var head struct {
+		Type    string `json:"type"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	_ = json.Unmarshal(payload.Item, &head)
+
+	if head.Type == "agentMessage" {
+		for _, content := range head.Content {
+			if content.Type == "text" && content.Text != "" {
+				r.dispatchTurnEvent(payload.ThreadID, acpTurnEvent{Text: content.Text})
+			}
+		}
 		return
 	}
-	for _, content := range payload.Item.Content {
-		if content.Type == "text" && content.Text != "" {
-			r.dispatchTurnEvent(payload.ThreadID, acpTurnEvent{Text: content.Text})
+
+	if tool, target, ok := codexToolFromItem(head.Type, payload.Item); ok {
+		r.dispatchProgress(agent.ProgressEvent{Kind: "tool", Tool: tool, Target: target})
+	}
+}
+
+// dispatchProgress calls the per-turn progress callback (if any) under the lock.
+func (r *ACPRuntime) dispatchProgress(ev agent.ProgressEvent) {
+	r.mu.Lock()
+	fn := r.activeProgress
+	r.mu.Unlock()
+	if fn != nil {
+		fn(ev)
+	}
+}
+
+// codexToolFromItem maps a codex ACP item to a canonical (tool, target) pair.
+// Field names confirmed from a live item/started sample with codex-cli 0.137.0:
+//   - type "commandExecution" carries field "command" with the full shell command.
+//   - type "fileChange"/"patch" carries field "path" with the affected file path.
+//   - type "mcpToolCall"/"toolCall" carries field "name" with the tool name.
+func codexToolFromItem(itemType string, raw json.RawMessage) (string, string, bool) {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", "", false
+	}
+	switch itemType {
+	case "commandExecution", "command_execution", "command":
+		return "Bash", agent.TargetFromInput("Bash", m), true
+	case "fileChange", "file_change", "patch":
+		if v, ok := m["path"]; ok {
+			m["file_path"] = v
 		}
+		return "Edit", agent.TargetFromInput("Edit", m), true
+	case "mcpToolCall", "mcp_tool_call", "toolCall":
+		name, _ := m["name"].(string)
+		if name == "" {
+			name = "Task"
+		}
+		return name, agent.TargetFromInput(name, m), true
+	default:
+		return "", "", false
 	}
 }
 

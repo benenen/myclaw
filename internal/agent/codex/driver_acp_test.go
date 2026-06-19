@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -420,5 +421,76 @@ func TestBuildACPArgsSkipsForStubWhenNotRealCLI(t *testing.T) {
 	got := buildACPArgs("/tmp/fake-codex", []string{"x"}, false)
 	if len(got) != 1 || got[0] != "x" {
 		t.Fatalf("expected verbatim args for stub, got %v", got)
+	}
+}
+
+// TestHandleItemStarted_EmitsToolProgress verifies that handleItemStarted
+// emits a ProgressEvent for a commandExecution item.
+// JSON shape confirmed from a live codex-cli 0.137.0 item/started sample:
+//
+//	{"type":"commandExecution","command":"/bin/bash -lc 'ls -la .'","cwd":"/tmp/...","status":"inProgress",...}
+func TestHandleItemStarted_EmitsToolProgress(t *testing.T) {
+	var got []agent.ProgressEvent
+	var mu sync.Mutex
+	r := &ACPRuntime{
+		activeProgress: func(ev agent.ProgressEvent) {
+			mu.Lock()
+			got = append(got, ev)
+			mu.Unlock()
+		},
+	}
+	// Real sample shape from live capture (commandExecution with "command" field):
+	r.handleItemStarted(json.RawMessage(`{"threadId":"t","item":{"type":"commandExecution","id":"call_00","command":"ls -la","cwd":"/tmp","status":"inProgress"}}`))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 progress event, got %d: %+v", len(got), got)
+	}
+	if got[0].Kind != "tool" {
+		t.Fatalf("Kind = %q, want tool", got[0].Kind)
+	}
+	if got[0].Tool != "Bash" {
+		t.Fatalf("Tool = %q, want Bash", got[0].Tool)
+	}
+	if got[0].Target != "ls -la" {
+		t.Fatalf("Target = %q, want %q", got[0].Target, "ls -la")
+	}
+}
+
+// TestHandleItemStarted_AgentMessageStillWorks verifies that the existing
+// agentMessage path still dispatches text turn events and does NOT emit
+// a progress event.
+func TestHandleItemStarted_AgentMessageStillWorks(t *testing.T) {
+	progressCalled := false
+	turnCh := make(chan acpTurnEvent, 4)
+	r := &ACPRuntime{
+		activeProgress: func(ev agent.ProgressEvent) { progressCalled = true },
+		activeThread:   "t",
+		activeTurnCh:   turnCh,
+	}
+	r.handleItemStarted(json.RawMessage(`{"threadId":"t","item":{"type":"agentMessage","content":[{"type":"text","text":"hello"}]}}`))
+	if progressCalled {
+		t.Fatal("progress callback should not fire for agentMessage items")
+	}
+	select {
+	case ev := <-turnCh:
+		if ev.Text != "hello" {
+			t.Fatalf("turnEvent.Text = %q, want hello", ev.Text)
+		}
+	default:
+		t.Fatal("expected a turn event for agentMessage item")
+	}
+}
+
+// TestHandleItemStarted_UnknownItemTypeIgnored verifies that unknown item types
+// do not emit progress events.
+func TestHandleItemStarted_UnknownItemTypeIgnored(t *testing.T) {
+	progressCalled := false
+	r := &ACPRuntime{
+		activeProgress: func(ev agent.ProgressEvent) { progressCalled = true },
+	}
+	r.handleItemStarted(json.RawMessage(`{"threadId":"t","item":{"type":"reasoning","summary":[]}}`))
+	if progressCalled {
+		t.Fatal("progress callback should not fire for reasoning items")
 	}
 }

@@ -49,6 +49,11 @@ type executor interface {
 	Send(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error)
 }
 
+// progressReporter begins a per-turn trace session; nil session = no tracing.
+type progressReporter interface {
+	Begin(ctx context.Context, target channel.ReplyTarget) channel.ProgressSession
+}
+
 type botWorker struct {
 	queue chan InboundMessage
 }
@@ -74,6 +79,7 @@ type BotMessageOrchestrator struct {
 	replies           replyGateway
 	resolver          specResolver
 	sessions          domain.BotCLISessionRepository
+	progress          progressReporter
 	messageContext    func(context.Context) context.Context
 	workerIdleTime    time.Duration
 	processingTimeout time.Duration
@@ -107,6 +113,23 @@ func (o *BotMessageOrchestrator) SetMessageContext(fn func(context.Context) cont
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.messageContext = fn
+}
+
+// SetProgressReporter wires the optional live-trace reporter. nil disables tracing.
+func (o *BotMessageOrchestrator) SetProgressReporter(p progressReporter) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.progress = p
+}
+
+func (o *BotMessageOrchestrator) beginProgress(ctx context.Context, target channel.ReplyTarget) channel.ProgressSession {
+	o.mu.Lock()
+	p := o.progress
+	o.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.Begin(ctx, target)
 }
 
 func (o *BotMessageOrchestrator) attachContext(ctx context.Context, msg InboundMessage) InboundMessage {
@@ -295,6 +318,8 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 	ctx, cancel := o.processingContext(msg.Ctx, spec.Timeout)
 	defer cancel()
 
+	sess := o.beginProgress(ctx, msg.ReplyTarget)
+
 	type sendResult struct {
 		resp agent.Response
 		err  error
@@ -302,12 +327,16 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 
 	sendDone := make(chan sendResult, 1)
 	go func() {
-		resp, err := o.executor.Send(ctx, msg.BotID, spec, agent.Request{
+		req := agent.Request{
 			BotID:     msg.BotID,
 			UserID:    msg.From,
 			MessageID: msg.MessageID,
 			Prompt:    msg.Text,
-		})
+		}
+		if sess != nil {
+			req.OnProgress = func(ev agent.ProgressEvent) { sess.Step(ctx, ev) }
+		}
+		resp, err := o.executor.Send(ctx, msg.BotID, spec, req)
 		sendDone <- sendResult{resp: resp, err: err}
 	}()
 
@@ -327,6 +356,9 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 		} else if result.resp.RuntimeType != "" && strings.TrimSpace(result.resp.Text) != "" {
 			replyText = result.resp.RuntimeType + ": " + strings.TrimSpace(result.resp.Text)
 		}
+		if sess != nil {
+			sess.Fail(ctx, replyText)
+		}
 		o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
 		o.finishMessageEventually(msg, false)
 		return
@@ -342,16 +374,28 @@ func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage
 			log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, result.resp.RuntimeType, err)
 		}
 	}
+	if sess != nil {
+		sess.Done(ctx)
+	}
 	o.replyWithTimeout(ctx, msg, result.resp)
 	o.finishMessageEventually(msg, true)
 }
 
-// runOrchestratorTurn acks immediately and runs the brain turn detached so the
-// channel worker is freed; the final answer is pushed over the saved target.
+// runOrchestratorTurn acks (via the trace card when tracing is on, else text)
+// and runs the brain turn detached; the final answer is pushed over the saved
+// target after the trace card finalizes.
 func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMessage, spec agent.Spec) {
-	o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
-
 	base := context.WithoutCancel(msg.Ctx)
+	sess := o.beginProgress(base, msg.ReplyTarget)
+	if sess != nil {
+		if err := sess.Ack(base); err != nil {
+			sess = nil
+			o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
+		}
+	} else {
+		o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
+	}
+
 	timeout := spec.Timeout
 	go func() {
 		ctx := base
@@ -360,16 +404,23 @@ func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMe
 			ctx, cancel = context.WithTimeout(base, timeout)
 			defer cancel()
 		}
-		resp, err := o.executor.Send(ctx, msg.BotID, spec, agent.Request{
+		req := agent.Request{
 			BotID:     msg.BotID,
 			UserID:    msg.From,
 			MessageID: msg.MessageID,
 			Prompt:    msg.Text,
-		})
+		}
+		if sess != nil {
+			req.OnProgress = func(ev agent.ProgressEvent) { sess.Step(ctx, ev) }
+		}
+		resp, err := o.executor.Send(ctx, msg.BotID, spec, req)
 		if err != nil {
 			replyText := failedReply
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				replyText = timeoutReply
+			}
+			if sess != nil {
+				sess.Fail(ctx, replyText)
 			}
 			o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
 			o.finishMessageEventually(msg, false)
@@ -384,6 +435,9 @@ func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMe
 			}); err != nil {
 				log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, resp.RuntimeType, err)
 			}
+		}
+		if sess != nil {
+			sess.Done(ctx)
 		}
 		o.replyWithTimeout(ctx, msg, resp)
 		o.finishMessageEventually(msg, true)

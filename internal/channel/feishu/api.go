@@ -249,4 +249,66 @@ func (a *apiClient) send(ctx context.Context, client *lark.Client, msgType, cont
 	return nil
 }
 
+// CreateCard sends an interactive-card message (threaded when ReplyMessageID is
+// set) and returns the new message id for later patching.
+func (a *apiClient) CreateCard(ctx context.Context, creds Credentials, p CardParams) (string, error) {
+	client := a.larkClient(creds.AppID, creds.AppSecret)
+	if p.ReplyMessageID != "" {
+		resp, err := client.Im.V1.Message.Reply(ctx, larkim.NewReplyMessageReqBuilder().
+			MessageId(p.ReplyMessageID).
+			Body(larkim.NewReplyMessageReqBodyBuilder().
+				MsgType(larkim.MsgTypeInteractive).
+				Content(p.Content).
+				Build()).
+			Build())
+		if err != nil {
+			return "", err
+		}
+		if !resp.Success() {
+			return "", fmt.Errorf("feishu reply card failed: code=%d msg=%s", resp.Code, resp.Msg)
+		}
+		if resp.Data == nil || resp.Data.MessageId == nil {
+			return "", fmt.Errorf("feishu reply card returned no message id")
+		}
+		return *resp.Data.MessageId, nil
+	}
+
+	resp, err := client.Im.V1.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().
+		ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeChatId).
+		Body(larkim.NewCreateMessageReqBodyBuilder().
+			ReceiveId(p.ChatID).
+			MsgType(larkim.MsgTypeInteractive).
+			Content(p.Content).
+			Build()).
+		Build())
+	if err != nil {
+		return "", err
+	}
+	if !resp.Success() {
+		return "", fmt.Errorf("feishu create card failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	if resp.Data == nil || resp.Data.MessageId == nil {
+		return "", fmt.Errorf("feishu create card returned no message id")
+	}
+	return *resp.Data.MessageId, nil
+}
+
+// PatchCard replaces the content of an existing interactive card in place.
+func (a *apiClient) PatchCard(ctx context.Context, creds Credentials, messageID, cardJSON string) error {
+	client := a.larkClient(creds.AppID, creds.AppSecret)
+	resp, err := client.Im.V1.Message.Patch(ctx, larkim.NewPatchMessageReqBuilder().
+		MessageId(messageID).
+		Body(larkim.NewPatchMessageReqBodyBuilder().
+			Content(cardJSON).
+			Build()).
+		Build())
+	if err != nil {
+		return err
+	}
+	if !resp.Success() {
+		return fmt.Errorf("feishu patch card failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
 var _ feishuAPI = (*apiClient)(nil)

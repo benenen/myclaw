@@ -40,11 +40,23 @@ type SendParams struct {
 	Mentions       []string
 }
 
+// CardParams describes an outbound interactive-card message. A non-empty
+// ReplyMessageID threads it under the original message.
+type CardParams struct {
+	ChatID         string
+	Content        string // interactive-card JSON
+	ReplyMessageID string
+}
+
 // feishuAPI abstracts the Feishu REST surface so provider/reply logic can be
 // tested without real network calls. The real implementation lives in api.go.
 type feishuAPI interface {
 	ValidateApp(ctx context.Context, appID, appSecret string) (AppInfo, error)
 	SendText(ctx context.Context, creds Credentials, p SendParams) error
+	// CreateCard sends a new interactive card and returns its message id.
+	CreateCard(ctx context.Context, creds Credentials, p CardParams) (string, error)
+	// PatchCard replaces the content of an existing interactive card.
+	PatchCard(ctx context.Context, creds Credentials, messageID, cardJSON string) error
 }
 
 // dialer opens a Feishu WebSocket long-connection. The real implementation

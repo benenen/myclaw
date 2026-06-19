@@ -43,6 +43,9 @@ type Request struct {
 	Prompt    string
 	WorkDir   string
 	Metadata  map[string]string
+	// OnProgress, when non-nil, is invoked by the driver as it parses
+	// intermediate tool events during a turn. Nil = no tracing (default).
+	OnProgress func(ProgressEvent)
 }
 
 type Response struct {

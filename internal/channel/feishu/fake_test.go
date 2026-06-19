@@ -33,6 +33,14 @@ func (f *fakeAPI) SendText(_ context.Context, creds Credentials, p SendParams) e
 	return nil
 }
 
+func (f *fakeAPI) CreateCard(_ context.Context, _ Credentials, _ CardParams) (string, error) {
+	return "msg-1", nil
+}
+
+func (f *fakeAPI) PatchCard(_ context.Context, _ Credentials, _, _ string) error {
+	return nil
+}
+
 type fakeDialer struct {
 	conn      *fakeConn
 	dialErr   error
