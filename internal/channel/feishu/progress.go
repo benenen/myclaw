@@ -124,7 +124,6 @@ type traceSession struct {
 	degraded  bool
 	terminal  string
 	reason    string
-	dirty     bool
 	lastPatch time.Time
 
 	startOnce sync.Once
@@ -198,13 +197,11 @@ func (s *traceSession) flushNow(final bool) {
 			return
 		}
 		if !final {
-			s.dirty = false
 			s.mu.Unlock()
 			return // create already rendered current state
 		}
 	}
 	st := s.snapshot()
-	s.dirty = false
 	s.lastPatch = time.Now()
 	id := s.messageID
 	s.mu.Unlock()
@@ -216,6 +213,11 @@ func (s *traceSession) flushNow(final bool) {
 	}
 }
 
+// flushLoop owns all card RPCs. It runs on the detached baseCtx and exits only
+// when s.closed is closed by finish(). The orchestrator guarantees Done/Fail is
+// always called after a turn (including on ctx cancellation), so the loop is
+// bounded; the only unbounded path is an unrecovered panic, which ends the
+// process anyway.
 func (s *traceSession) flushLoop() {
 	defer close(s.flushed)
 	for {
@@ -264,7 +266,6 @@ func (s *traceSession) Ack(ctx context.Context) error {
 func (s *traceSession) Step(_ context.Context, ev agent.ProgressEvent) {
 	s.mu.Lock()
 	s.steps = append(s.steps, traceStep{tool: ev.Tool, target: ev.Target})
-	s.dirty = true
 	s.mu.Unlock()
 	s.ensureLoop()
 	s.signal()
