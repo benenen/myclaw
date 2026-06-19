@@ -49,3 +49,70 @@ func TestBuildTextContentMentionStillValidJSON(t *testing.T) {
 		t.Fatalf("expected body preserved, got %q", got.Text)
 	}
 }
+
+func TestIsRichMarkdown(t *testing.T) {
+	rich := map[string]string{
+		"table":             "header\n| a | b |\n|---|---|\n| 1 | 2 |",
+		"code fence":        "see this:\n```go\nfmt.Println(\"hi\")\n```",
+		"heading":           "# Title\nbody",
+		"heading indented":  "   ### Sub\ntext",
+		"table no outer pipe": "a | b\n--- | ---\n1 | 2",
+	}
+	for name, text := range rich {
+		if !isRichMarkdown(text) {
+			t.Errorf("%s: expected rich, got false", name)
+		}
+	}
+	plain := map[string]string{
+		"prose":        "hello there, how are you",
+		"bold only":    "this is **bold** and _italic_",
+		"list only":    "- one\n- two\n- three",
+		"link only":    "see [docs](https://example.com)",
+		"hr not table": "above\n---\nbelow",
+		"midline hash": "see issue #5 for details",
+		"empty":        "",
+	}
+	for name, text := range plain {
+		if isRichMarkdown(text) {
+			t.Errorf("%s: expected plain, got rich", name)
+		}
+	}
+}
+
+func TestBuildCardContentValidJSONWithMarkdown(t *testing.T) {
+	text := "# T\n| a | b |\n|---|---|\n| 1 | 2 |"
+	content := buildCardContent(SendParams{Text: text})
+	if !json.Valid([]byte(content)) {
+		t.Fatalf("card content not valid JSON: %s", content)
+	}
+	var card struct {
+		Elements []struct {
+			Tag     string `json:"tag"`
+			Content string `json:"content"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal([]byte(content), &card); err != nil {
+		t.Fatal(err)
+	}
+	if len(card.Elements) != 1 || card.Elements[0].Tag != "markdown" {
+		t.Fatalf("expected one markdown element, got %#v", card.Elements)
+	}
+	if card.Elements[0].Content != text {
+		t.Fatalf("content mismatch: %q vs %q", card.Elements[0].Content, text)
+	}
+}
+
+func TestBuildCardContentGroupMention(t *testing.T) {
+	content := buildCardContent(SendParams{Text: "# hi", Mentions: []string{"ou_sender"}})
+	var card struct {
+		Elements []struct {
+			Content string `json:"content"`
+		} `json:"elements"`
+	}
+	if err := json.Unmarshal([]byte(content), &card); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(card.Elements[0].Content, `<at id="ou_sender"></at>`) {
+		t.Fatalf("expected card @at prefix, got %q", card.Elements[0].Content)
+	}
+}

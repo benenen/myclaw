@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -130,15 +132,94 @@ func buildTextContent(p SendParams) string {
 	return string(encoded)
 }
 
+var headingRe = regexp.MustCompile(`^\s{0,3}#{1,6}\s`)
+
+// isRichMarkdown reports whether text contains markdown that is unreadable as
+// raw text — a fenced code block, an ATX heading, or a table — and therefore
+// should be rendered via a feishu interactive card rather than plain text.
+func isRichMarkdown(text string) bool {
+	if strings.Contains(text, "```") {
+		return true
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if headingRe.MatchString(line) {
+			return true
+		}
+		if strings.Contains(line, "|") && i+1 < len(lines) && isTableSeparator(lines[i+1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTableSeparator reports whether a line is a GFM table separator row — only
+// |, -, :, and whitespace, with at least one - and one | (so a bare "---"
+// horizontal rule is not mistaken for a table).
+func isTableSeparator(line string) bool {
+	s := strings.TrimSpace(line)
+	if !strings.ContainsRune(s, '-') || !strings.ContainsRune(s, '|') {
+		return false
+	}
+	for _, r := range s {
+		switch r {
+		case '|', '-', ':', ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// buildCardContent builds the feishu interactive-card JSON for a markdown reply:
+// {"config":{"wide_screen_mode":true},"elements":[{"tag":"markdown","content":...}]}.
+// The markdown element renders tables/code/headings. Group @mentions use the
+// card <at id="..."></at> syntax. json.Marshal guarantees valid escaped JSON.
+func buildCardContent(p SendParams) string {
+	md := p.Text
+	if len(p.Mentions) > 0 {
+		var sb strings.Builder
+		for _, openID := range p.Mentions {
+			sb.WriteString(`<at id="`)
+			sb.WriteString(openID)
+			sb.WriteString(`"></at>`)
+		}
+		sb.WriteString(" ")
+		sb.WriteString(p.Text)
+		md = sb.String()
+	}
+	card := map[string]any{
+		"config":   map[string]any{"wide_screen_mode": true},
+		"elements": []any{map[string]any{"tag": "markdown", "content": md}},
+	}
+	b, err := json.Marshal(card)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
 func (a *apiClient) SendText(ctx context.Context, creds Credentials, p SendParams) error {
 	client := a.larkClient(creds.AppID, creds.AppSecret)
-	content := buildTextContent(p)
 
+	if isRichMarkdown(p.Text) {
+		if err := a.send(ctx, client, larkim.MsgTypeInteractive, buildCardContent(p), p); err == nil {
+			return nil
+		} else {
+			slog.Warn("feishu card send failed; falling back to text", "error", err)
+		}
+	}
+	return a.send(ctx, client, larkim.MsgTypeText, buildTextContent(p), p)
+}
+
+// send delivers a message of the given msg type and content, threading under
+// the original message when ReplyMessageID is set, otherwise creating a new one.
+func (a *apiClient) send(ctx context.Context, client *lark.Client, msgType, content string, p SendParams) error {
 	if p.ReplyMessageID != "" {
 		resp, err := client.Im.V1.Message.Reply(ctx, larkim.NewReplyMessageReqBuilder().
 			MessageId(p.ReplyMessageID).
 			Body(larkim.NewReplyMessageReqBodyBuilder().
-				MsgType(larkim.MsgTypeText).
+				MsgType(msgType).
 				Content(content).
 				Build()).
 			Build())
@@ -155,7 +236,7 @@ func (a *apiClient) SendText(ctx context.Context, creds Credentials, p SendParam
 		ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeChatId).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
 			ReceiveId(p.ChatID).
-			MsgType(larkim.MsgTypeText).
+			MsgType(msgType).
 			Content(content).
 			Build()).
 		Build())
