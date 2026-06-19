@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTargetFromInput_PrefersToolKey(t *testing.T) {
 	got := TargetFromInput("Bash", map[string]any{"command": "boo ls", "description": "list"})
@@ -24,13 +27,17 @@ func TestTargetFromInput_FallsBackToFirstStringField(t *testing.T) {
 }
 
 func TestTargetFromInput_TruncatesTo60(t *testing.T) {
-	long := ""
-	for i := 0; i < 80; i++ {
-		long += "x"
-	}
+	long := strings.Repeat("x", 80)
 	got := TargetFromInput("Bash", map[string]any{"command": long})
 	if len([]rune(got)) != 60 {
 		t.Fatalf("len = %d, want 60", len([]rune(got)))
+	}
+}
+
+func TestTargetFromInput_KnownToolEmptyCanonicalReturnsEmpty(t *testing.T) {
+	got := TargetFromInput("Bash", map[string]any{"command": "", "description": "fallback"})
+	if got != "" {
+		t.Fatalf("got %q, want \"\" (known tool must not fall back to another field)", got)
 	}
 }
 

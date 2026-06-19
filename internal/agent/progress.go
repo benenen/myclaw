@@ -28,11 +28,13 @@ var targetKeys = map[string]string{
 
 // TargetFromInput picks the salient target string from a tool's input map and
 // truncates it to maxTargetLen runes. Returns "" when no string field exists.
+// For known tools (listed in targetKeys) only the canonical field is used;
+// absent or empty canonical → "". Unknown tools fall back to the first
+// non-empty string field in sorted key order.
 func TargetFromInput(tool string, input map[string]any) string {
 	if key, ok := targetKeys[tool]; ok {
-		if v, ok := input[key].(string); ok && v != "" {
-			return truncate(v, maxTargetLen)
-		}
+		v, _ := input[key].(string)
+		return truncate(v, maxTargetLen) // canonical field only for known tools
 	}
 	keys := make([]string, 0, len(input))
 	for k := range input {
