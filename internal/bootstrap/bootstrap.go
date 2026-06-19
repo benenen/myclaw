@@ -84,9 +84,11 @@ func New(cfg config.Config) (*App, error) {
 	httpReplyGateway := httpchan.NewReplyGatewayWithReceiver(httpReceiver)
 
 	feishuRegistry := feishu.NewRegistry()
-	feishuAPI := feishu.NewAPI(feishu.LoadConfig())
+	feishuCfg := feishu.LoadConfig()
+	feishuAPI := feishu.NewAPI(feishuCfg)
 	feishuProvider := feishu.NewProvider(feishuAPI, feishu.NewDialer(), feishuRegistry, logger)
 	feishuReplyGateway := feishu.NewReplyGateway(feishuAPI, feishuRegistry)
+	feishuProgressReporter := feishu.NewProgressReporter(feishuAPI, feishuRegistry, feishuCfg.Trace)
 
 	multiProvider := channel.NewMultiProvider()
 	multiProvider.Register("wechat", wechatProvider, wechatProvider)
@@ -98,6 +100,9 @@ func New(cfg config.Config) (*App, error) {
 	multiReplyGateway.Register(httpchan.ChannelType, httpReplyGateway)
 	multiReplyGateway.Register("feishu", feishuReplyGateway)
 
+	multiProgressReporter := channel.NewMultiProgressReporter()
+	multiProgressReporter.Register("feishu", feishuProgressReporter)
+
 	executor := agent.NewManager()
 	resolver := bot.NewBotCLIResolver(botRepo, capabilityRepo, botCLISessionRepo, bot.BotCLIResolverConfig{
 		Timeout:             botCLITimeout,
@@ -108,6 +113,7 @@ func New(cfg config.Config) (*App, error) {
 		OrchestratorPrompt:  orchestration.OrchestratorPrompt(),
 	})
 	orchestrator := bot.NewBotMessageOrchestrator(executor, multiReplyGateway, resolver, botCLISessionRepo)
+	orchestrator.SetProgressReporter(multiProgressReporter)
 
 	taskStore := orchestration.NewTaskStore()
 	localRunner := orchestration.NewLocalRunner(resolver, executor)
