@@ -338,16 +338,22 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 
 		switch method {
 		case "initialize":
+			params, _ := msg["params"].(map[string]any)
+			if _, ok := params["protocolVersion"].(float64); !ok {
+				// Real opencode 1.15.13 requires protocolVersion (a number).
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32602, "message": "Invalid params: protocolVersion required"},
+				})
+				continue
+			}
 			writeACPJSON(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      id,
 				"result": map[string]any{
-					"serverInfo": map[string]any{"name": "opencode-acp", "version": "test"},
-					"capabilities": map[string]any{
-						"session/prompt":            true,
-						"session/new":               true,
-						"session/requestPermission": true,
-					},
+					"protocolVersion": 1,
+					"agentInfo":       map[string]any{"name": "opencode-acp", "version": "test"},
 				},
 			})
 		case "initialized":
@@ -356,6 +362,16 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 				os.Exit(5)
 			}
 		case "session/new":
+			params, _ := msg["params"].(map[string]any)
+			if _, ok := params["mcpServers"].([]any); !ok {
+				// Real opencode 1.15.13 requires mcpServers as an array.
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32602, "message": "Invalid params: mcpServers must be an array"},
+				})
+				continue
+			}
 			sessionCount++
 			sessionID = fmt.Sprintf("session-%d", sessionCount)
 			known[sessionID] = true
@@ -363,13 +379,30 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 				"jsonrpc": "2.0",
 				"id":      id,
 				"result": map[string]any{
-					"session": map[string]any{"id": sessionID},
+					"sessionId": sessionID,
 				},
 			})
 		case "session/prompt":
 			promptCount++
 			params, _ := msg["params"].(map[string]any)
 			gotSessionID, _ := params["sessionId"].(string)
+			// Real opencode 1.15.13 requires prompt as an array of content blocks
+			// ([{"type":"text","text":"..."}]); a bare "text" string is rejected.
+			promptArr, ok := params["prompt"].([]any)
+			if !ok {
+				writeACPJSON(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32602, "message": "Invalid params: prompt must be an array"},
+				})
+				continue
+			}
+			currentPrompt = ""
+			if len(promptArr) > 0 {
+				if block, ok := promptArr[0].(map[string]any); ok {
+					currentPrompt, _ = block["text"].(string)
+				}
+			}
 			if mode == "acp-reject-reused" && !known[gotSessionID] {
 				// Adopted resume id the server does not recognize.
 				writeACPJSON(map[string]any{
@@ -382,64 +415,49 @@ func TestHelperProcessOpencodeACP(t *testing.T) {
 			// In acp-success / acp-tool-call mode an adopted resume id is
 			// accepted as-is.
 			sessionID = gotSessionID
-			currentPrompt, _ = params["text"].(string)
 
-			writeACPJSON(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      id,
-				"result": map[string]any{
-					"promptId": fmt.Sprintf("prompt-%d", promptCount),
-				},
-			})
-
-			// In acp-tool-call mode emit a tool_call_update (in_progress) before
-			// the text reply, mirroring the confirmed opencode 1.15.13 shape.
+			// In acp-tool-call mode emit two tool_call_update(in_progress) for the
+			// same call before the text — the driver must deduplicate to one event.
 			if mode == "acp-tool-call" {
-				writeACPJSON(map[string]any{
-					"jsonrpc": "2.0",
-					"method":  "session/update",
-					"params": map[string]any{
-						"sessionId": sessionID,
-						"update": map[string]any{
-							"sessionUpdate": "tool_call_update",
-							"toolCallId":    "call_test_001",
-							"status":        "in_progress",
-							"title":         "bash",
-							"kind":          "execute",
-							"rawInput":      map[string]any{"command": "ls -la"},
+				for i := 0; i < 2; i++ {
+					writeACPJSON(map[string]any{
+						"jsonrpc": "2.0",
+						"method":  "session/update",
+						"params": map[string]any{
+							"sessionId": sessionID,
+							"update": map[string]any{
+								"sessionUpdate": "tool_call_update",
+								"toolCallId":    "call_test_001",
+								"status":        "in_progress",
+								"title":         "bash",
+								"kind":          "execute",
+								"rawInput":      map[string]any{"command": "ls -la"},
+							},
 						},
-					},
-				})
-				// Also emit a second update for the same call — the driver must
-				// deduplicate and emit only one ProgressEvent.
-				writeACPJSON(map[string]any{
-					"jsonrpc": "2.0",
-					"method":  "session/update",
-					"params": map[string]any{
-						"sessionId": sessionID,
-						"update": map[string]any{
-							"sessionUpdate": "tool_call_update",
-							"toolCallId":    "call_test_001",
-							"status":        "in_progress",
-							"title":         "bash",
-							"kind":          "execute",
-							"rawInput":      map[string]any{"command": "ls -la"},
-						},
-					},
-				})
+					})
+				}
 			}
 
+			// Real opencode streams the answer as agent_message_chunk updates.
 			writeACPJSON(map[string]any{
 				"jsonrpc": "2.0",
 				"method":  "session/update",
 				"params": map[string]any{
 					"sessionId": sessionID,
-					"contentItem": map[string]any{
-						"type":      "text",
-						"text":      "reply:" + currentPrompt,
-						"completed": true,
+					"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"messageId":     fmt.Sprintf("msg-%d", promptCount),
+						"content":       map[string]any{"type": "text", "text": "reply:" + currentPrompt},
 					},
 				},
+			})
+
+			// The session/prompt RPC result (with stopReason) is the turn-completion
+			// signal — there is no contentItem "completed" event.
+			writeACPJSON(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  map[string]any{"stopReason": "end_turn"},
 			})
 		default:
 			if result, ok := msg["result"].(map[string]any); ok {
