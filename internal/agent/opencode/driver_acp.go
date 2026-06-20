@@ -159,6 +159,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	defer cancel()
 
 	if _, err := runtime.rpc(initCtx, "initialize", map[string]any{
+		"protocolVersion": 1,
 		"clientInfo": map[string]string{
 			"name":    "myclaw",
 			"version": "0.1.0",
@@ -295,11 +296,17 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 // new id, and retries the prompt exactly once. Any final error is delivered on
 // promptCh so Run can fail the turn.
 func (r *ACPRuntime) sendPrompt(ctx context.Context, sessionID, workDir, prompt string, promptCh chan acpPromptEvent) {
+	// opencode 1.15.13 requires prompt as an array of content blocks.
+	promptBlocks := []map[string]any{{"type": "text", "text": prompt}}
+
 	_, rpcErr := r.rpc(ctx, "session/prompt", map[string]any{
 		"sessionId": sessionID,
-		"text":      prompt,
+		"prompt":    promptBlocks,
 	})
 	if rpcErr == nil {
+		// The session/prompt RPC result is the turn-completion signal; answer
+		// text has already streamed in as agent_message_chunk deltas.
+		r.signalCompleted(ctx, promptCh)
 		return
 	}
 
@@ -344,12 +351,24 @@ func (r *ACPRuntime) sendPrompt(ctx context.Context, sessionID, workDir, prompt 
 
 	if _, retryErr := r.rpc(ctx, "session/prompt", map[string]any{
 		"sessionId": newID,
-		"text":      prompt,
+		"prompt":    promptBlocks,
 	}); retryErr != nil {
 		select {
 		case promptCh <- acpPromptEvent{Kind: "error", Err: retryErr}:
 		default:
 		}
+		return
+	}
+	r.signalCompleted(ctx, promptCh)
+}
+
+// signalCompleted delivers the turn-completion event to the active prompt loop.
+// It blocks (bounded by ctx) rather than dropping, so a full delta buffer can
+// never lose the completion signal.
+func (r *ACPRuntime) signalCompleted(ctx context.Context, promptCh chan acpPromptEvent) {
+	select {
+	case promptCh <- acpPromptEvent{Kind: "completed"}:
+	case <-ctx.Done():
 	}
 }
 
@@ -449,29 +468,29 @@ func (r *ACPRuntime) ensureSession(ctx context.Context, workDir string) (string,
 
 // newSession creates a fresh session via session/new and caches it.
 func (r *ACPRuntime) newSession(ctx context.Context, workDir string) (string, error) {
-	result, err := r.rpc(ctx, "session/new", map[string]any{"cwd": workDir})
+	// opencode 1.15.13 requires mcpServers as an array and returns the new id as
+	// a top-level "sessionId" (not nested under "session.id").
+	result, err := r.rpc(ctx, "session/new", map[string]any{"cwd": workDir, "mcpServers": []any{}})
 	if err != nil {
 		return "", err
 	}
 
 	var sessionResult struct {
-		Session struct {
-			ID string `json:"id"`
-		} `json:"session"`
+		SessionID string `json:"sessionId"`
 	}
 	if err := json.Unmarshal(result, &sessionResult); err != nil {
 		return "", fmt.Errorf("decode opencode acp session/new result: %w", err)
 	}
-	if sessionResult.Session.ID == "" {
+	if sessionResult.SessionID == "" {
 		return "", fmt.Errorf("opencode acp session/new returned empty session id")
 	}
 
 	r.mu.Lock()
-	r.sessionID = sessionResult.Session.ID
+	r.sessionID = sessionResult.SessionID
 	r.sessionWorkDir = workDir
 	r.sessionAdopted = false
 	r.mu.Unlock()
-	return sessionResult.Session.ID, nil
+	return sessionResult.SessionID, nil
 }
 
 func (r *ACPRuntime) notify(method string, params interface{}) error {
@@ -678,6 +697,11 @@ func (r *ACPRuntime) handleSessionUpdate(params json.RawMessage) {
 			Title         string         `json:"title"`
 			Kind          string         `json:"kind"`
 			RawInput      map[string]any `json:"rawInput"`
+			// Content is the answer-text payload for agent_message_chunk events
+			// ({"type":"text","text":"..."}). It is json.RawMessage because other
+			// update kinds (e.g. tool_call_update completed) carry content as an
+			// array, which must not fail the shared decode.
+			Content json.RawMessage `json:"content"`
 		} `json:"update"`
 	}
 	if err := json.Unmarshal(params, &payload); err != nil {
@@ -713,6 +737,17 @@ func (r *ACPRuntime) handleSessionUpdate(params json.RawMessage) {
 					Target: agent.TargetFromInput(tool, u.RawInput),
 				})
 			}
+		}
+	}
+
+	// opencode 1.15.13 streams answer text as agent_message_chunk events whose
+	// content is {"type":"text","text":"..."}. Accumulate each chunk as a delta.
+	if payload.Update.SessionUpdate == "agent_message_chunk" && len(payload.Update.Content) > 0 {
+		var c struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(payload.Update.Content, &c); err == nil && c.Text != "" {
+			r.dispatchDelta(sessionID, c.Text)
 		}
 	}
 
