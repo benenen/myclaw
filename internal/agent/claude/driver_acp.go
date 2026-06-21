@@ -352,8 +352,13 @@ func (r *ACPRuntime) handleLine(line string) {
 
 	if evt.Type == "system" && evt.Subtype == "init" && evt.SessionID != "" {
 		r.mu.Lock()
-		r.sessionID = evt.SessionID
-		r.mu.Unlock()
+		if r.sessionID == "" {
+			r.sessionID = evt.SessionID
+			r.mu.Unlock()
+			slog.Info("agent session captured", "bot_id", r.spec.BotID, "runtime", runtimeTypeClaude, "session_id", evt.SessionID)
+		} else {
+			r.mu.Unlock()
+		}
 	}
 
 	if evt.Type == "assistant" && evt.Message != nil {

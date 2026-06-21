@@ -404,6 +404,7 @@ func (r *ACPRuntime) ensureThread(ctx context.Context, workDir string) (string, 
 	r.threadID = id
 	r.threadWorkDir = workDir
 	r.mu.Unlock()
+	slog.Info("codex acp thread created", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "thread_id", id)
 	return id, nil
 }
 

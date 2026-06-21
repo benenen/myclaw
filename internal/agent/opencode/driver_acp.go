@@ -491,6 +491,7 @@ func (r *ACPRuntime) newSession(ctx context.Context, workDir string) (string, er
 	r.sessionWorkDir = workDir
 	r.sessionAdopted = false
 	r.mu.Unlock()
+	slog.Info("opencode acp session created", "bot_id", r.spec.BotID, "runtime", runtimeTypeOpencode, "session_id", sessionResult.SessionID)
 	return sessionResult.SessionID, nil
 }
 
