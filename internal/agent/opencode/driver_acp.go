@@ -137,6 +137,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start opencode acp: %w", err)
 	}
+	slog.InfoContext(ctx, "agent process started", "cmd", cmd.String())
 
 	runtime := &ACPRuntime{
 		spec:    spec,
