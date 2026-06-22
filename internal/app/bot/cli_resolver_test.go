@@ -385,6 +385,95 @@ func TestResolveInjectsAttachedEnabledMCPServers(t *testing.T) {
 	}
 }
 
+func TestResolveInjectsMCPForNonOrchestratorBot(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_worker",
+		Name:              "worker-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		// Role left empty — not orchestrator
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Command:        "/usr/local/bin/claude",
+			Args:           []string{"--stream-json"},
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout: time.Minute,
+		// no MCPURL, no OrchestratorPrompt
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_worker": {
+			{ID: "mcp_x", Name: "toolsrv", ServerType: "http", URL: "http://toolsrv", Enabled: true},
+		},
+	}})
+
+	spec, err := r.Resolve(context.Background(), "bot_worker")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if spec.Orchestrator {
+		t.Fatal("expected Orchestrator=false for non-orchestrator bot")
+	}
+
+	joined := strings.Join(spec.Args, " ")
+	idx := slices.Index(spec.Args, "--mcp-config")
+	if idx < 0 || idx+1 >= len(spec.Args) {
+		t.Fatalf("--mcp-config flag missing in args: %v", spec.Args)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(spec.Args[idx+1]), &cfg); err != nil {
+		t.Fatalf("mcp-config not valid JSON: %v", err)
+	}
+	srv, ok := cfg.MCPServers["toolsrv"]
+	if !ok || srv["type"] != "http" || srv["url"] != "http://toolsrv" {
+		t.Fatalf("expected toolsrv in mcp config: %v", cfg.MCPServers)
+	}
+	if strings.Contains(joined, "--append-system-prompt") {
+		t.Fatalf("non-orchestrator must NOT get --append-system-prompt: %v", spec.Args)
+	}
+}
+
+func TestResolveNoMCPConfigWhenNoServers(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_plain",
+		Name:              "plain-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		// Role left empty — not orchestrator
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Command:        "/usr/local/bin/claude",
+			Args:           []string{"--stream-json"},
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	// no MCPURL and ListEnabledByBot returns empty slice
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout: time.Minute,
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{}})
+
+	spec, err := r.Resolve(context.Background(), "bot_plain")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, arg := range spec.Args {
+		if arg == "--mcp-config" {
+			t.Fatalf("--mcp-config should NOT appear when no servers: %v", spec.Args)
+		}
+	}
+}
+
 type agentSessionRepoStub struct {
 	byKey map[string]domain.BotCLISession // key = botID + "|" + cliType
 }
