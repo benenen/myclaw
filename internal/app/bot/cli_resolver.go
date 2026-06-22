@@ -40,6 +40,7 @@ type BotCLIResolver struct {
 	orchestratorTimeout time.Duration
 	mcpURL              string
 	orchestratorPrompt  string
+	mcpServers          domain.MCPServerRepository
 }
 
 func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapabilityRepository, sessions domain.BotCLISessionRepository, cfg BotCLIResolverConfig) *BotCLIResolver {
@@ -54,6 +55,10 @@ func NewBotCLIResolver(bots domain.BotRepository, capabilities domain.AgentCapab
 		mcpURL:              cfg.MCPURL,
 		orchestratorPrompt:  cfg.OrchestratorPrompt,
 	}
+}
+
+func (r *BotCLIResolver) SetMCPServerRepository(repo domain.MCPServerRepository) {
+	r.mcpServers = repo
 }
 
 func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec, error) {
@@ -122,7 +127,7 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		}
 		extra := []string{}
 		if r.mcpURL != "" {
-			extra = append(extra, "--mcp-config", mcpConfigJSON(r.mcpURL))
+			extra = append(extra, "--mcp-config", r.buildMCPConfigJSON(ctx, botID))
 		}
 		if r.orchestratorPrompt != "" {
 			extra = append(extra, "--append-system-prompt", r.orchestratorPrompt)
@@ -132,16 +137,35 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 	return spec, nil
 }
 
-func mcpConfigJSON(url string) string {
-	cfg := map[string]any{
-		"mcpServers": map[string]any{
-			"myclaw": map[string]any{
-				"type": "http",
-				"url":  url,
-			},
+func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) string {
+	mcpServers := map[string]any{
+		"myclaw": map[string]any{
+			"type": "http",
+			"url":  r.mcpURL,
 		},
 	}
-	data, _ := json.Marshal(cfg)
+	if r.mcpServers != nil {
+		servers, err := r.mcpServers.ListEnabledByBot(ctx, botID)
+		if err != nil {
+			log.Printf("mcp server list failed for bot %s, using only myclaw: %v", botID, err)
+		} else {
+			for _, srv := range servers {
+				cfg := map[string]any{"type": srv.ServerType}
+				if srv.ServerType == "http" {
+					cfg["url"] = srv.URL
+				} else {
+					args := srv.Args
+					if args == nil {
+						args = []string{}
+					}
+					cfg["command"] = srv.Command
+					cfg["args"] = args
+				}
+				mcpServers[srv.Name] = cfg
+			}
+		}
+	}
+	data, _ := json.Marshal(map[string]any{"mcpServers": mcpServers})
 	return string(data)
 }
 
