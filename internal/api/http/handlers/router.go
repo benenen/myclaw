@@ -34,6 +34,7 @@ func RegisterRoutes(mux *stdhttp.ServeMux, deps Dependencies) {
 	mux.Handle("POST /api/v1/bots/simulate-message", wrap(SimulateBotMessage(deps.MessageSimulator)))
 	mux.Handle("GET /api/v1/bots/connect", wrap(RefreshBotLogin(deps.BotService)))
 	mux.Handle("GET /api/v1/agent-capabilities", wrap(ListAgentCapabilities(deps.BotService)))
+	mux.Handle("GET /api/v1/mcp-servers", wrap(ListMCPServers(deps.BotService)))
 
 	if deps.HookManager != nil {
 		mux.Handle("POST /hooks/{platform}/{botname}", wrap(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
