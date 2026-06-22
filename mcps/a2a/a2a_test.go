@@ -108,12 +108,81 @@ func TestRunDispatchEmptyPrompt(t *testing.T) {
 	}
 }
 
-func TestRunDispatchBooNotYetImplemented(t *testing.T) {
+func TestDispatchBooDelta(t *testing.T) {
+	before := "line1\nline2\n"                                // 2 history lines before
+	after := "line1\nline2\necho hello\nhi there\nuser@h:~$ " // prompt echo + answer + shell prompt
+	calls := 0
 	defer stubBoo(func(args ...string) ([]byte, int, error) {
-		return []byte(`[{"name":"build","title":"t"}]`), 0, nil
+		calls++
+		switch args[0] {
+		case "peek":
+			if calls == 1 {
+				return []byte(before), 0, nil
+			}
+			return []byte(after), 0, nil
+		case "send", "wait":
+			return nil, 0, nil
+		}
+		return nil, 0, nil
 	})()
-	if _, err := runDispatch(context.Background(), []Source{{Kind: "boo"}}, newA2AClient(nil), DispatchInput{AgentName: "build", Prompt: "hi"}); err == nil {
-		t.Fatal("boo dispatch should error until Task 2")
+	got, err := dispatchBoo(context.Background(), "build", "echo hello", "30s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "hi there" { // prompt-echo line + trailing shell prompt trimmed
+		t.Fatalf("delta = %q, want %q", got, "hi there")
+	}
+}
+
+func TestDispatchBooSessionMissing(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 3, nil })() // exit 3
+	if _, err := dispatchBoo(context.Background(), "ghost", "hi", "5s"); err == nil {
+		t.Fatal("expected session-not-running error")
+	}
+}
+
+func TestDispatchBooTimeoutStillReturns(t *testing.T) {
+	calls := 0
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		calls++
+		switch args[0] {
+		case "peek":
+			if calls == 1 {
+				return []byte("a\n"), 0, nil
+			}
+			return []byte("a\npartial output\n"), 0, nil
+		case "wait":
+			return nil, 4, nil // timeout, non-fatal
+		}
+		return nil, 0, nil
+	})()
+	got, err := dispatchBoo(context.Background(), "build", "x", "1s")
+	if err != nil {
+		t.Fatalf("timeout should not error: %v", err)
+	}
+	if got != "partial output" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRunDispatchRoutesBoo(t *testing.T) {
+	calls := 0
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		calls++
+		if args[0] == "ls" {
+			return []byte(`[{"name":"build","title":"t"}]`), 0, nil
+		}
+		if args[0] == "peek" {
+			if calls <= 2 { // ls then first peek
+				return []byte("a\n"), 0, nil
+			}
+			return []byte("a\nprompt\nresult-text\n"), 0, nil
+		}
+		return nil, 0, nil
+	})()
+	out, err := runDispatch(context.Background(), []Source{{Kind: "boo"}}, newA2AClient(nil), DispatchInput{AgentName: "build", Prompt: "prompt"})
+	if err != nil || out.Result == "" {
+		t.Fatalf("boo route: out=%+v err=%v", out, err)
 	}
 }
 

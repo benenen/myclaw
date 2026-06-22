@@ -298,13 +298,105 @@ func runDispatch(ctx context.Context, sources []Source, c *a2aClient, in Dispatc
 		return DispatchOutput{}, fmt.Errorf("no such a2a server: %s", in.AgentName)
 	}
 	switch target.Kind {
-	case kindBoo:
-		return DispatchOutput{}, fmt.Errorf("boo dispatch not yet implemented")
-	default:
+	case kindHTTP:
 		result, err := c.send(ctx, target.Endpoint, target.AuthToken, in.Prompt)
 		if err != nil {
 			return DispatchOutput{}, err
 		}
 		return DispatchOutput{Result: result}, nil
+	case kindBoo:
+		result, err := dispatchBoo(ctx, target.Session, in.Prompt, target.WaitTimeout)
+		if err != nil {
+			return DispatchOutput{}, err
+		}
+		return DispatchOutput{Result: result}, nil
+	default:
+		return DispatchOutput{}, fmt.Errorf("unknown a2a server kind: %s", target.Kind)
 	}
+}
+
+// dispatchBoo types the prompt into a boo session, waits for it to settle, and
+// returns the newly-produced scrollback (best-effort: a terminal is not a clean
+// request/response channel).
+func dispatchBoo(ctx context.Context, session, prompt, waitTimeout string) (string, error) {
+	before, err := booPeek(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	// Count lines as number of '\n' characters so a trailing newline doesn't
+	// produce a phantom empty element (strings.Split("a\n","\n") → ["a",""] = 2).
+	beforeLines := strings.Count(before, "\n")
+
+	if _, code, err := runBoo(ctx, "send", session, "--text", prompt, "--enter"); err != nil {
+		return "", fmt.Errorf("boo not available: %w", err)
+	} else if e := booDispatchErr(session, code); e != nil {
+		return "", e
+	}
+
+	// wait is a settle hint; timeout (exit 4) is non-fatal.
+	if _, code, err := runBoo(ctx, "wait", session, "--idle", "--timeout", waitTimeout); err != nil {
+		return "", fmt.Errorf("boo not available: %w", err)
+	} else if e := booDispatchErr(session, code); e != nil {
+		return "", e
+	}
+
+	after, err := booPeek(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	afterLines := strings.Split(after, "\n")
+	if beforeLines > len(afterLines) {
+		beforeLines = len(afterLines)
+	}
+	delta := afterLines[beforeLines:]
+	return trimDelta(delta, prompt), nil
+}
+
+func booPeek(ctx context.Context, session string) (string, error) {
+	out, code, err := runBoo(ctx, "peek", session, "--scrollback")
+	if err != nil {
+		return "", fmt.Errorf("boo not available: %w", err)
+	}
+	if e := booDispatchErr(session, code); e != nil {
+		return "", e
+	}
+	return string(out), nil
+}
+
+func booDispatchErr(session string, code int) error {
+	switch code {
+	case 0, 4: // 4 = wait timeout, non-fatal
+		return nil
+	case 3:
+		return fmt.Errorf("boo session not running: %s", session)
+	default:
+		return fmt.Errorf("boo error (exit %d) for session %s", code, session)
+	}
+}
+
+// trimDelta cleans the raw scrollback delta:
+// (a) if the first line contains the prompt string, drop it (prompt echo);
+// (b) drop trailing lines that are empty or end in $ # % > after right-trimming spaces;
+// (c) join remaining lines with "\n".
+func trimDelta(lines []string, prompt string) string {
+	// (a) drop prompt-echo first line
+	if len(lines) > 0 && strings.Contains(lines[0], prompt) {
+		lines = lines[1:]
+	}
+	// (b) drop trailing blank/shell-prompt lines
+	for len(lines) > 0 {
+		last := strings.TrimRight(lines[len(lines)-1], " ")
+		if last == "" {
+			lines = lines[:len(lines)-1]
+			continue
+		}
+		switch last[len(last)-1] {
+		case '$', '#', '%', '>':
+			lines = lines[:len(lines)-1]
+			continue
+		}
+		break
+	}
+	// (c) join
+	return strings.Join(lines, "\n")
 }
