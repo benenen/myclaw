@@ -317,6 +317,55 @@ func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
 	}
 }
 
+type stubMCPServerRepo struct {
+	domain.MCPServerRepository // embed; only ListEnabledByBot is exercised
+	byBot map[string][]domain.MCPServer
+}
+
+func (s stubMCPServerRepo) ListEnabledByBot(_ context.Context, botID string) ([]domain.MCPServer, error) {
+	return s.byBot[botID], nil
+}
+
+func TestResolveInjectsAttachedEnabledMCPServers(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_brain",
+		Name:              "brain-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		Role:              domain.BotRoleOrchestrator,
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Command:        "/usr/local/bin/claude",
+			Args:           []string{"--stream-json"},
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout:             time.Minute,
+		OrchestratorTimeout: 25 * time.Minute,
+		MCPURL:              "http://127.0.0.1:8080/mcp",
+		OrchestratorPrompt:  "BRAIN-PROMPT",
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_brain": {{ID: "mcp_a", Name: "extra", ServerType: "http", URL: "http://extra", Enabled: true}},
+	}})
+
+	spec, err := r.Resolve(context.Background(), "bot_brain")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	joined := strings.Join(spec.Args, " ")
+	if !strings.Contains(joined, "\"myclaw\"") || !strings.Contains(joined, "\"extra\"") {
+		t.Fatalf("expected myclaw + extra in mcp config, got: %s", joined)
+	}
+	if !strings.Contains(joined, "http://extra") {
+		t.Fatalf("expected extra url in config, got: %s", joined)
+	}
+}
+
 type agentSessionRepoStub struct {
 	byKey map[string]domain.BotCLISession // key = botID + "|" + cliType
 }
