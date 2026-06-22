@@ -37,10 +37,10 @@ func main() {
 		URI:         "boo://sessions",
 		Name:        "boo-sessions",
 		Title:       "Live boo sessions",
-		Description: "Live boo sessions you can route subtasks to. Read boo://session/<name> for one session's capabilities.",
+		Description: "Live boo sessions you can route subtasks to, each with its capability. Read boo://session/<name> for one session's full detail.",
 		MIMEType:    "application/json",
 	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		data, _ := json.Marshal(map[string]any{"sessions": booRoster(ctx)})
+		data, _ := json.Marshal(map[string]any{"sessions": booRosterDetailed(ctx)})
 		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
 			{URI: "boo://sessions", MIMEType: "application/json", Text: string(data)},
 		}}, nil

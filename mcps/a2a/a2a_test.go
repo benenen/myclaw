@@ -393,3 +393,21 @@ func TestBooSessionDetailLiveNoCapability(t *testing.T) {
 		t.Fatalf("detail: %+v ok=%v (want ok, empty cap/cwd)", d, ok)
 	}
 }
+
+func TestBooRosterDetailedEnrichesCapability(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"a build","idle_ms":5}]`), 0, nil
+	})()
+	tmp := t.TempDir()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	cwd := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, "boo"), 0o755)
+	os.WriteFile(filepath.Join(tmp, "boo", "build.state"), []byte(cwd+"\n"), 0o600)
+	os.WriteFile(filepath.Join(cwd, "boo.capabilities.json"), []byte(`{"description":"go coder"}`), 0o600)
+
+	got := booRosterDetailed(context.Background())
+	if len(got) != 1 || got[0].Name != "build" || got[0].Capability != "go coder" || got[0].Cwd != cwd {
+		t.Fatalf("detailed roster: %+v", got)
+	}
+}
