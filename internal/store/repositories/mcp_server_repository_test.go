@@ -88,11 +88,17 @@ func TestMCPServerBotAttachment(t *testing.T) {
 		t.Fatalf("attach b: %v", err)
 	}
 
-	all, _ := repo.ListByBot(ctx, "bot_1")
+	all, err := repo.ListByBot(ctx, "bot_1")
+	if err != nil {
+		t.Fatalf("list by bot: %v", err)
+	}
 	if len(all) != 2 {
 		t.Fatalf("ListByBot = %d, want 2", len(all))
 	}
-	enabled, _ := repo.ListEnabledByBot(ctx, "bot_1")
+	enabled, err := repo.ListEnabledByBot(ctx, "bot_1")
+	if err != nil {
+		t.Fatalf("list enabled by bot: %v", err)
+	}
 	if len(enabled) != 1 || enabled[0].ID != "mcp_a" {
 		t.Fatalf("ListEnabledByBot = %+v, want only mcp_a", enabled)
 	}
@@ -101,26 +107,52 @@ func TestMCPServerBotAttachment(t *testing.T) {
 	if err := repo.SetBotServers(ctx, "bot_1", []string{b.ID}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	all, _ = repo.ListByBot(ctx, "bot_1")
+	all, err = repo.ListByBot(ctx, "bot_1")
+	if err != nil {
+		t.Fatalf("list after set: %v", err)
+	}
 	if len(all) != 1 || all[0].ID != "mcp_b" {
 		t.Fatalf("after set ListByBot = %+v, want only mcp_b", all)
 	}
 
-	// detach
+	// empty set clears all attachments
+	if err := repo.SetBotServers(ctx, "bot_1", []string{}); err != nil {
+		t.Fatalf("clear set: %v", err)
+	}
+	cleared, err := repo.ListByBot(ctx, "bot_1")
+	if err != nil {
+		t.Fatalf("list after clear: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("empty SetBotServers did not clear: %+v", cleared)
+	}
+
+	// detach — re-attach b first so there is something to detach
+	if err := repo.AttachToBot(ctx, "bot_1", b.ID); err != nil {
+		t.Fatalf("re-attach b before detach: %v", err)
+	}
 	if err := repo.DetachFromBot(ctx, "bot_1", b.ID); err != nil {
 		t.Fatalf("detach: %v", err)
 	}
-	all, _ = repo.ListByBot(ctx, "bot_1")
+	all, err = repo.ListByBot(ctx, "bot_1")
+	if err != nil {
+		t.Fatalf("list after detach: %v", err)
+	}
 	if len(all) != 0 {
 		t.Fatalf("after detach = %d, want 0", len(all))
 	}
 
 	// delete cascades join rows
-	repo.AttachToBot(ctx, "bot_2", a.ID)
+	if err := repo.AttachToBot(ctx, "bot_2", a.ID); err != nil {
+		t.Fatalf("attach a to bot_2: %v", err)
+	}
 	if err := repo.DeleteByID(ctx, a.ID); err != nil {
 		t.Fatalf("delete a: %v", err)
 	}
-	leftover, _ := repo.ListByBot(ctx, "bot_2")
+	leftover, err := repo.ListByBot(ctx, "bot_2")
+	if err != nil {
+		t.Fatalf("list bot_2 after cascade: %v", err)
+	}
 	if len(leftover) != 0 {
 		t.Fatalf("delete did not cascade: %+v", leftover)
 	}
