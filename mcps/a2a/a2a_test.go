@@ -10,114 +10,193 @@ import (
 	"testing"
 )
 
-func TestLoadRegistry(t *testing.T) {
+// stubBoo swaps runBoo for tests; returns a restore func.
+func stubBoo(fn func(args ...string) ([]byte, int, error)) func() {
+	prev := runBoo
+	runBoo = func(_ context.Context, args ...string) ([]byte, int, error) { return fn(args...) }
+	return func() { runBoo = prev }
+}
+
+func TestLoadSources(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "servers.json")
-	if err := os.WriteFile(p, []byte(`[{"name":"w","description":"weather","endpoint":"http://x/a2a","auth_token":"sek"}]`), 0o600); err != nil {
-		t.Fatal(err)
+	p := filepath.Join(dir, "c.json")
+	os.WriteFile(p, []byte(`[{"kind":"http","name":"w","endpoint":"http://x","auth_token":"sek"},{"kind":"boo"},{"name":"noKind","endpoint":"http://y"}]`), 0o600)
+	src, err := loadSources(p)
+	if err != nil || len(src) != 3 {
+		t.Fatalf("sources: %+v err %v", src, err)
 	}
-	reg, err := loadRegistry(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, ok := reg.find("w")
-	if !ok || s.Endpoint != "http://x/a2a" || s.AuthToken != "sek" {
-		t.Fatalf("find: %+v ok=%v", s, ok)
-	}
-	if _, ok := reg.find("nope"); ok {
-		t.Fatal("unexpected find")
+	if src[0].kind() != "http" || src[1].kind() != "boo" || src[2].kind() != "http" {
+		t.Fatalf("kinds: %q %q %q", src[0].kind(), src[1].kind(), src[2].kind())
 	}
 }
 
-func TestLoadRegistryEmptyPath(t *testing.T) {
-	reg, err := loadRegistry("")
-	if err != nil || len(reg.servers) != 0 {
-		t.Fatalf("empty path -> empty registry, got %+v err %v", reg, err)
+func TestLoadSourcesEmptyAndMissing(t *testing.T) {
+	if s, err := loadSources(""); err != nil || s != nil {
+		t.Fatalf("empty path -> nil,nil, got %+v %v", s, err)
 	}
-}
-
-func TestLoadRegistryMissingFile(t *testing.T) {
-	if _, err := loadRegistry("/no/such/file.json"); err == nil {
+	if _, err := loadSources("/no/such.json"); err == nil {
 		t.Fatal("expected error for missing file")
 	}
 }
 
-func TestRunListOmitsToken(t *testing.T) {
-	reg := Registry{servers: []Server{{Name: "w", Description: "d", Endpoint: "e", AuthToken: "SECRET"}}}
-	out := runList(reg)
-	if len(out.Servers) != 1 || out.Servers[0].Name != "w" || out.Servers[0].Endpoint != "e" {
-		t.Fatalf("bad list: %+v", out)
+func TestResolveHTTPPassthrough(t *testing.T) {
+	got := resolve(context.Background(), []Source{{Kind: "http", Name: "w", Description: "d", Endpoint: "e", AuthToken: "t"}})
+	if len(got) != 1 || got[0].Kind != "http" || got[0].Endpoint != "e" || got[0].AuthToken != "t" {
+		t.Fatalf("resolve http: %+v", got)
 	}
-	// ServerView has no token field — leaking the auth token is a compile error.
 }
 
-func TestRunDispatchMessageResult(t *testing.T) {
+func TestResolveBooExpandsSessions(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		// expect ["ls","--json"]
+		return []byte(`[{"name":"build","title":"a build"},{"name":"chat","title":"a chat"}]`), 0, nil
+	})()
+	got := resolve(context.Background(), []Source{{Kind: "boo", WaitTimeout: "30s"}})
+	if len(got) != 2 {
+		t.Fatalf("want 2 boo servers, got %+v", got)
+	}
+	if got[0].Kind != "boo" || got[0].Name != "build" || got[0].Session != "build" || got[0].Description != "a build" || got[0].WaitTimeout != "30s" {
+		t.Fatalf("boo[0]: %+v", got[0])
+	}
+}
+
+func TestResolveBooFailureKeepsHTTP(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 1, nil })() // boo ls fails
+	got := resolve(context.Background(), []Source{{Kind: "http", Name: "w", Endpoint: "e"}, {Kind: "boo"}})
+	if len(got) != 1 || got[0].Name != "w" {
+		t.Fatalf("boo failure should leave only http, got %+v", got)
+	}
+}
+
+func TestRunListOmitsTokenIncludesKind(t *testing.T) {
+	out := runList([]ResolvedServer{{Name: "w", Description: "d", Endpoint: "e", Kind: "http", AuthToken: "SECRET"}})
+	if len(out.Servers) != 1 || out.Servers[0].Kind != "http" || out.Servers[0].Endpoint != "e" {
+		t.Fatalf("list: %+v", out)
+	}
+	// ServerView has no token field — leaking is a compile error.
+}
+
+func TestRunDispatchHTTP(t *testing.T) {
 	var gotAuth, gotText string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		var req a2aRequest
 		json.NewDecoder(r.Body).Decode(&req)
-		m := req.Params["message"].(map[string]any)
-		gotText = m["parts"].([]any)[0].(map[string]any)["text"].(string)
-		w.Write([]byte(`{"jsonrpc":"2.0","id":"1","result":{"kind":"message","role":"agent","parts":[{"kind":"text","text":"the answer"}]}}`))
+		gotText = req.Params["message"].(map[string]any)["parts"].([]any)[0].(map[string]any)["text"].(string)
+		w.Write([]byte(`{"result":{"kind":"message","parts":[{"kind":"text","text":"the answer"}]}}`))
 	}))
 	defer srv.Close()
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL, AuthToken: "sek"}}}
-	out, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
+	sources := []Source{{Kind: "http", Name: "w", Endpoint: srv.URL, AuthToken: "sek"}}
+	out, err := runDispatch(context.Background(), sources, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
 	if err != nil || out.Result != "the answer" {
 		t.Fatalf("got %+v err %v", out, err)
 	}
-	if gotAuth != "Bearer sek" {
-		t.Fatalf("auth = %q", gotAuth)
-	}
-	if gotText != "hi" {
-		t.Fatalf("prompt sent = %q", gotText)
+	if gotAuth != "Bearer sek" || gotText != "hi" {
+		t.Fatalf("auth=%q text=%q", gotAuth, gotText)
 	}
 }
+
+func TestRunDispatchUnknownAgent(t *testing.T) {
+	if _, err := runDispatch(context.Background(), []Source{{Kind: "http", Name: "w", Endpoint: "http://unused"}}, newA2AClient(nil), DispatchInput{AgentName: "ghost", Prompt: "hi"}); err == nil {
+		t.Fatal("expected no-such-server error")
+	}
+}
+
+func TestRunDispatchEmptyPrompt(t *testing.T) {
+	if _, err := runDispatch(context.Background(), []Source{{Kind: "http", Name: "w", Endpoint: "http://unused"}}, newA2AClient(nil), DispatchInput{AgentName: "w"}); err == nil {
+		t.Fatal("expected empty-prompt error")
+	}
+}
+
+func TestDispatchBooDelta(t *testing.T) {
+	before := "line1\nline2\n"                                // 2 history lines before
+	after := "line1\nline2\necho hello\nhi there\nuser@h:~$ " // prompt echo + answer + shell prompt
+	calls := 0
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		calls++
+		switch args[0] {
+		case "peek":
+			if calls == 1 {
+				return []byte(before), 0, nil
+			}
+			return []byte(after), 0, nil
+		case "send", "wait":
+			return nil, 0, nil
+		}
+		return nil, 0, nil
+	})()
+	got, err := dispatchBoo(context.Background(), "build", "echo hello", "30s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "hi there" { // prompt-echo line + trailing shell prompt trimmed
+		t.Fatalf("delta = %q, want %q", got, "hi there")
+	}
+}
+
+func TestDispatchBooSessionMissing(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 3, nil })() // exit 3
+	if _, err := dispatchBoo(context.Background(), "ghost", "hi", "5s"); err == nil {
+		t.Fatal("expected session-not-running error")
+	}
+}
+
+func TestDispatchBooTimeoutStillReturns(t *testing.T) {
+	calls := 0
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		calls++
+		switch args[0] {
+		case "peek":
+			if calls == 1 {
+				return []byte("a\n"), 0, nil
+			}
+			return []byte("a\npartial output\n"), 0, nil
+		case "wait":
+			return nil, 4, nil // timeout, non-fatal
+		}
+		return nil, 0, nil
+	})()
+	got, err := dispatchBoo(context.Background(), "build", "x", "1s")
+	if err != nil {
+		t.Fatalf("timeout should not error: %v", err)
+	}
+	if got != "partial output" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRunDispatchRoutesBoo(t *testing.T) {
+	calls := 0
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		calls++
+		if args[0] == "ls" {
+			return []byte(`[{"name":"build","title":"t"}]`), 0, nil
+		}
+		if args[0] == "peek" {
+			if calls <= 2 { // ls then first peek
+				return []byte("a\n"), 0, nil
+			}
+			return []byte("a\nprompt\nresult-text\n"), 0, nil
+		}
+		return nil, 0, nil
+	})()
+	out, err := runDispatch(context.Background(), []Source{{Kind: "boo"}}, newA2AClient(nil), DispatchInput{AgentName: "build", Prompt: "prompt"})
+	if err != nil || out.Result == "" {
+		t.Fatalf("boo route: out=%+v err=%v", out, err)
+	}
+}
+
+// ---- Task-2-era http result-shape tests (kept; adapted to new []Source signature) ----
 
 func TestRunDispatchTaskResult(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"result":{"kind":"task","status":{"message":{"parts":[{"kind":"text","text":"task-answer"}]}}}}`))
 	}))
 	defer srv.Close()
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL}}}
-	out, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
+	sources := []Source{{Kind: "http", Name: "w", Endpoint: srv.URL}}
+	out, err := runDispatch(context.Background(), sources, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
 	if err != nil || out.Result != "task-answer" {
 		t.Fatalf("got %+v err %v", out, err)
-	}
-}
-
-func TestRunDispatchUnknownAgent(t *testing.T) {
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: "http://unused"}}}
-	if _, err := runDispatch(context.Background(), reg, newA2AClient(nil), DispatchInput{AgentName: "ghost", Prompt: "hi"}); err == nil {
-		t.Fatal("expected no-such-server error")
-	}
-}
-
-func TestRunDispatchEmptyPrompt(t *testing.T) {
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: "http://unused"}}}
-	if _, err := runDispatch(context.Background(), reg, newA2AClient(nil), DispatchInput{AgentName: "w"}); err == nil {
-		t.Fatal("expected empty-prompt error")
-	}
-}
-
-func TestRunDispatchJSONRPCError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"error":{"code":-32000,"message":"boom"}}`))
-	}))
-	defer srv.Close()
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL}}}
-	if _, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"}); err == nil {
-		t.Fatal("expected a2a json-rpc error")
-	}
-}
-
-func TestRunDispatchNon2xx(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
-	defer srv.Close()
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL}}}
-	if _, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"}); err == nil {
-		t.Fatal("expected non-2xx error")
 	}
 }
 
@@ -126,9 +205,29 @@ func TestRunDispatchArtifactResult(t *testing.T) {
 		w.Write([]byte(`{"result":{"kind":"task","artifacts":[{"parts":[{"kind":"text","text":"artifact-answer"}]}]}}`))
 	}))
 	defer srv.Close()
-	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL}}}
-	out, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
+	sources := []Source{{Kind: "http", Name: "w", Endpoint: srv.URL}}
+	out, err := runDispatch(context.Background(), sources, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
 	if err != nil || out.Result != "artifact-answer" {
 		t.Fatalf("got %+v err %v", out, err)
+	}
+}
+
+func TestRunDispatchJSONRPCError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"error":{"code":-32000,"message":"boom"}}`))
+	}))
+	defer srv.Close()
+	sources := []Source{{Kind: "http", Name: "w", Endpoint: srv.URL}}
+	if _, err := runDispatch(context.Background(), sources, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"}); err == nil {
+		t.Fatal("expected a2a json-rpc error")
+	}
+}
+
+func TestRunDispatchNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
+	defer srv.Close()
+	sources := []Source{{Kind: "http", Name: "w", Endpoint: srv.URL}}
+	if _, err := runDispatch(context.Background(), sources, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"}); err == nil {
+		t.Fatal("expected non-2xx error")
 	}
 }
