@@ -69,3 +69,59 @@ func TestMCPServerListOrdersByName(t *testing.T) {
 		t.Fatalf("expected [alpha bravo], got %+v", list)
 	}
 }
+
+func TestMCPServerBotAttachment(t *testing.T) {
+	repo := newMCPRepo(t)
+	ctx := context.Background()
+
+	a, _ := repo.Create(ctx, domain.MCPServer{ID: "mcp_a", Name: "a", ServerType: "http", URL: "http://a", Enabled: true})
+	b, _ := repo.Create(ctx, domain.MCPServer{ID: "mcp_b", Name: "b", ServerType: "http", URL: "http://b", Enabled: false})
+
+	// attach is idempotent
+	if err := repo.AttachToBot(ctx, "bot_1", a.ID); err != nil {
+		t.Fatalf("attach a: %v", err)
+	}
+	if err := repo.AttachToBot(ctx, "bot_1", a.ID); err != nil {
+		t.Fatalf("re-attach a: %v", err)
+	}
+	if err := repo.AttachToBot(ctx, "bot_1", b.ID); err != nil {
+		t.Fatalf("attach b: %v", err)
+	}
+
+	all, _ := repo.ListByBot(ctx, "bot_1")
+	if len(all) != 2 {
+		t.Fatalf("ListByBot = %d, want 2", len(all))
+	}
+	enabled, _ := repo.ListEnabledByBot(ctx, "bot_1")
+	if len(enabled) != 1 || enabled[0].ID != "mcp_a" {
+		t.Fatalf("ListEnabledByBot = %+v, want only mcp_a", enabled)
+	}
+
+	// replace-set
+	if err := repo.SetBotServers(ctx, "bot_1", []string{b.ID}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	all, _ = repo.ListByBot(ctx, "bot_1")
+	if len(all) != 1 || all[0].ID != "mcp_b" {
+		t.Fatalf("after set ListByBot = %+v, want only mcp_b", all)
+	}
+
+	// detach
+	if err := repo.DetachFromBot(ctx, "bot_1", b.ID); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	all, _ = repo.ListByBot(ctx, "bot_1")
+	if len(all) != 0 {
+		t.Fatalf("after detach = %d, want 0", len(all))
+	}
+
+	// delete cascades join rows
+	repo.AttachToBot(ctx, "bot_2", a.ID)
+	if err := repo.DeleteByID(ctx, a.ID); err != nil {
+		t.Fatalf("delete a: %v", err)
+	}
+	leftover, _ := repo.ListByBot(ctx, "bot_2")
+	if len(leftover) != 0 {
+		t.Fatalf("delete did not cascade: %+v", leftover)
+	}
+}

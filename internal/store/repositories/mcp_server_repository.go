@@ -9,6 +9,7 @@ import (
 	"github.com/benenen/myclaw/internal/domain"
 	"github.com/benenen/myclaw/internal/store/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MCPServerRepository struct {
@@ -150,5 +151,57 @@ func toDomainMCPServers(rows []models.MCPServer) []domain.MCPServer {
 	return items
 }
 
-// Per-bot join methods and the domain.MCPServerRepository interface
-// assertion are added in Task 4 (mcp_server_repository.go cont.).
+func (r *MCPServerRepository) ListByBot(ctx context.Context, botID string) ([]domain.MCPServer, error) {
+	return r.listJoined(ctx, botID, false)
+}
+
+func (r *MCPServerRepository) ListEnabledByBot(ctx context.Context, botID string) ([]domain.MCPServer, error) {
+	return r.listJoined(ctx, botID, true)
+}
+
+func (r *MCPServerRepository) listJoined(ctx context.Context, botID string, onlyEnabled bool) ([]domain.MCPServer, error) {
+	q := r.db.WithContext(ctx).
+		Joins("JOIN bot_mcp_servers bms ON bms.mcp_server_id = mcp_servers.id").
+		Where("bms.bot_id = ?", botID)
+	if onlyEnabled {
+		q = q.Where("mcp_servers.enabled = ?", true)
+	}
+	var rows []models.MCPServer
+	if err := q.Order("mcp_servers.name asc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return toDomainMCPServers(rows), nil
+}
+
+func (r *MCPServerRepository) AttachToBot(ctx context.Context, botID, serverID string) error {
+	m := models.BotMCPServer{BotID: botID, MCPServerID: serverID, CreatedAt: time.Now().UTC()}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&m).Error
+}
+
+func (r *MCPServerRepository) DetachFromBot(ctx context.Context, botID, serverID string) error {
+	return r.db.WithContext(ctx).
+		Where("bot_id = ? AND mcp_server_id = ?", botID, serverID).
+		Delete(&models.BotMCPServer{}).Error
+}
+
+func (r *MCPServerRepository) SetBotServers(ctx context.Context, botID string, serverIDs []string) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("bot_id = ?", botID).Delete(&models.BotMCPServer{}).Error; err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for _, id := range serverIDs {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			if err := tx.Create(&models.BotMCPServer{BotID: botID, MCPServerID: id, CreatedAt: now}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+var _ domain.MCPServerRepository = (*MCPServerRepository)(nil)
