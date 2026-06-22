@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/benenen/myclaw/internal/agent"
+	"github.com/benenen/myclaw/internal/app/mcpserver"
 	"github.com/benenen/myclaw/internal/domain"
 )
 
@@ -152,9 +153,9 @@ func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) s
 			for _, srv := range servers {
 				cfg := map[string]any{"type": srv.ServerType}
 				switch srv.ServerType {
-				case "http":
+				case mcpserver.TypeHTTP:
 					cfg["url"] = srv.URL
-				case "stdio":
+				case mcpserver.TypeStdio:
 					args := srv.Args
 					if args == nil {
 						args = []string{}
