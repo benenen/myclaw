@@ -330,10 +330,10 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 	if err != nil {
 		return BotListItem{}, err
 	}
-	if s.mcp != nil {
-		if err := s.mcp.SetBotServers(ctx, bot.ID, input.MCPServerIDs); err != nil {
-			return BotListItem{}, err
-		}
+	// The bot row and its MCP attachments are written in separate statements
+	// (no single transaction); a failure here returns an error and the caller retries.
+	if err := s.mcp.SetBotServers(ctx, bot.ID, input.MCPServerIDs); err != nil {
+		return BotListItem{}, err
 	}
 	mcpIDs, err := s.attachedServerIDs(ctx, bot.ID)
 	if err != nil {
@@ -354,9 +354,6 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 }
 
 func (s *BotService) attachedServerIDs(ctx context.Context, botID string) ([]string, error) {
-	if s.mcp == nil {
-		return []string{}, nil
-	}
 	servers, err := s.mcp.ListByBot(ctx, botID)
 	if err != nil {
 		return nil, err
@@ -369,9 +366,6 @@ func (s *BotService) attachedServerIDs(ctx context.Context, botID string) ([]str
 }
 
 func (s *BotService) ListMCPServers(ctx context.Context) ([]domain.MCPServer, error) {
-	if s.mcp == nil {
-		return []domain.MCPServer{}, nil
-	}
 	return s.mcp.List(ctx)
 }
 
