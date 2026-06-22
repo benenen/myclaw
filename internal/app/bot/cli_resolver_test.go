@@ -474,6 +474,145 @@ func TestResolveNoMCPConfigWhenNoServers(t *testing.T) {
 	}
 }
 
+func TestResolveCodexUsesDashCNotMcpConfig(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_codex",
+		Name:              "codex-bot",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "acp",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {
+			ID:             "cap_codex",
+			Key:            "codex",
+			Command:        "/usr/local/bin/codex",
+			SupportedModes: []string{"acp"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout: time.Minute,
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_codex": {
+			{ID: "mcp_a2a", Name: "a2a", ServerType: "stdio", Command: "/usr/local/bin/a2a-mcp", Args: []string{"--config", "/x.json"}, Enabled: true},
+		},
+	}})
+
+	spec, err := r.Resolve(context.Background(), "bot_codex")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// must NOT contain --mcp-config
+	for _, arg := range spec.Args {
+		if arg == "--mcp-config" {
+			t.Fatalf("codex must NOT receive --mcp-config, args: %v", spec.Args)
+		}
+	}
+
+	// must contain -c mcp_servers.a2a.command=...
+	foundCommand := false
+	foundArgs := false
+	for i, arg := range spec.Args {
+		if arg == "-c" && i+1 < len(spec.Args) {
+			next := spec.Args[i+1]
+			if strings.Contains(next, "mcp_servers.a2a.command=") {
+				foundCommand = true
+			}
+			if strings.Contains(next, "mcp_servers.a2a.args=") {
+				foundArgs = true
+			}
+		}
+	}
+	if !foundCommand {
+		t.Fatalf("expected -c mcp_servers.a2a.command= in args: %v", spec.Args)
+	}
+	if !foundArgs {
+		t.Fatalf("expected -c mcp_servers.a2a.args= in args: %v", spec.Args)
+	}
+}
+
+func TestResolveCodexSkipsHTTPServers(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_codex_http",
+		Name:              "codex-http-bot",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "acp",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {
+			ID:             "cap_codex",
+			Key:            "codex",
+			Command:        "/usr/local/bin/codex",
+			SupportedModes: []string{"acp"},
+			Available:      true,
+		},
+	}}
+	// MCPURL set (built-in myclaw http server would be collected) + no stdio attached
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout: time.Minute,
+		MCPURL:  "http://127.0.0.1:8080/mcp",
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{}})
+
+	spec, err := r.Resolve(context.Background(), "bot_codex_http")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	joined := strings.Join(spec.Args, " ")
+	if strings.Contains(joined, "mcp_servers.myclaw") {
+		t.Fatalf("codex must NOT get -c mcp_servers.myclaw (http skipped), args: %v", spec.Args)
+	}
+	if strings.Contains(joined, "--mcp-config") {
+		t.Fatalf("codex must NOT get --mcp-config, args: %v", spec.Args)
+	}
+}
+
+func TestResolveClaudeStillUsesMcpConfig(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_claude",
+		Name:              "claude-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Key:            "claude",
+			Command:        "/usr/local/bin/claude",
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout: time.Minute,
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_claude": {
+			{ID: "mcp_tools", Name: "tools", ServerType: "stdio", Command: "npx", Args: []string{"-y", "mcp-server"}, Enabled: true},
+		},
+	}})
+
+	spec, err := r.Resolve(context.Background(), "bot_claude")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// must contain --mcp-config
+	idx := slices.Index(spec.Args, "--mcp-config")
+	if idx < 0 || idx+1 >= len(spec.Args) {
+		t.Fatalf("claude must still receive --mcp-config, args: %v", spec.Args)
+	}
+
+	// must NOT contain -c mcp_servers
+	joined := strings.Join(spec.Args, " ")
+	if strings.Contains(joined, "-c mcp_servers") {
+		t.Fatalf("claude must NOT receive -c mcp_servers flags, args: %v", spec.Args)
+	}
+}
+
 type agentSessionRepoStub struct {
 	byKey map[string]domain.BotCLISession // key = botID + "|" + cliType
 }
