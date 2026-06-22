@@ -242,6 +242,14 @@ func TestBooConfigDir(t *testing.T) {
 	if d := booConfigDir(); d != "/y/boo" {
 		t.Fatalf("XDG dir = %q, want /y/boo", d)
 	}
+	// Home fallback: both BOO_CONFIG and XDG_CONFIG_HOME unset.
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".config", "boo")
+	if d := booConfigDir(); d != want {
+		t.Fatalf("home fallback = %q, want %q", d, want)
+	}
 }
 
 func TestBooSessionCwd(t *testing.T) {
@@ -282,6 +290,12 @@ func TestBooCapabilitiesDescription(t *testing.T) {
 	os.WriteFile(filepath.Join(bad, "boo.capabilities.json"), []byte(`{not json`), 0o600)
 	if _, ok := booCapabilitiesDescription(bad); ok {
 		t.Fatal("invalid json should be !ok")
+	}
+	// Empty object: present but no description/skills → ("", false).
+	empty := t.TempDir()
+	os.WriteFile(filepath.Join(empty, "boo.capabilities.json"), []byte(`{}`), 0o600)
+	if got, ok := booCapabilitiesDescription(empty); ok || got != "" {
+		t.Fatalf("empty object: got %q ok=%v, want (\"\", false)", got, ok)
 	}
 }
 
