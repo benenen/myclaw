@@ -7,47 +7,125 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 )
 
-// Server is one registry entry (the auth token stays internal).
-type Server struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Endpoint    string `json:"endpoint"`
+const (
+	kindHTTP = "http"
+	kindBoo  = "boo"
+)
+
+// Source is one config entry. kind defaults to "http".
+type Source struct {
+	Kind        string `json:"kind,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Endpoint    string `json:"endpoint,omitempty"`
 	AuthToken   string `json:"auth_token,omitempty"`
+	WaitTimeout string `json:"wait_timeout,omitempty"` // boo source default for dispatched waits
 }
 
-type Registry struct {
-	servers []Server
-}
-
-func (r Registry) find(name string) (Server, bool) {
-	for _, s := range r.servers {
-		if s.Name == name {
-			return s, true
-		}
+func (s Source) kind() string {
+	if s.Kind == "" {
+		return kindHTTP
 	}
-	return Server{}, false
+	return s.Kind
 }
 
-// loadRegistry reads a JSON array of servers from path. Empty path -> empty
-// registry (no error); a missing/invalid file -> error (main treats it as empty).
-func loadRegistry(path string) (Registry, error) {
+// ResolvedServer is a dispatchable target after expanding sources.
+type ResolvedServer struct {
+	Name        string
+	Description string
+	Kind        string
+	Endpoint    string
+	AuthToken   string
+	Session     string
+	WaitTimeout string
+}
+
+func loadSources(path string) ([]Source, error) {
 	if path == "" {
-		return Registry{}, nil
+		return nil, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Registry{}, fmt.Errorf("read a2a config %q: %w", path, err)
+		return nil, fmt.Errorf("read a2a config %q: %w", path, err)
 	}
-	var servers []Server
-	if err := json.Unmarshal(data, &servers); err != nil {
-		return Registry{}, fmt.Errorf("parse a2a config %q: %w", path, err)
+	var sources []Source
+	if err := json.Unmarshal(data, &sources); err != nil {
+		return nil, fmt.Errorf("parse a2a config %q: %w", path, err)
 	}
-	return Registry{servers: servers}, nil
+	return sources, nil
+}
+
+// runBoo is the single exec seam for the `boo` CLI; tests stub it.
+var runBoo = func(ctx context.Context, args ...string) (stdout []byte, exitCode int, err error) {
+	cmd := exec.CommandContext(ctx, "boo", args...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err = cmd.Run()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return out.Bytes(), exitErr.ExitCode(), nil
+	}
+	if err != nil {
+		return out.Bytes(), -1, err
+	}
+	return out.Bytes(), 0, nil
+}
+
+type booSession struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
+}
+
+// resolve expands sources into live servers. http passes through; a boo source
+// runs `boo ls --json` and emits one server per session. boo failures are logged
+// and skipped (http sources still resolve). Duplicate names are dropped (first wins).
+func resolve(ctx context.Context, sources []Source) []ResolvedServer {
+	var out []ResolvedServer
+	seen := map[string]bool{}
+	add := func(rs ResolvedServer) {
+		if rs.Name == "" || seen[rs.Name] {
+			return
+		}
+		seen[rs.Name] = true
+		out = append(out, rs)
+	}
+	for _, s := range sources {
+		if s.kind() != kindHTTP {
+			continue
+		}
+		add(ResolvedServer{Name: s.Name, Description: s.Description, Kind: kindHTTP, Endpoint: s.Endpoint, AuthToken: s.AuthToken})
+	}
+	for _, s := range sources {
+		if s.kind() != kindBoo {
+			continue
+		}
+		stdout, code, err := runBoo(ctx, "ls", "--json")
+		if err != nil || code != 0 {
+			log.Printf("a2a: boo ls failed (skipping boo sessions): code=%d err=%v", code, err)
+			continue
+		}
+		var sessions []booSession
+		if len(bytes.TrimSpace(stdout)) > 0 {
+			if err := json.Unmarshal(stdout, &sessions); err != nil {
+				log.Printf("a2a: parse boo ls --json: %v", err)
+				continue
+			}
+		}
+		wt := s.WaitTimeout
+		if wt == "" {
+			wt = "60s"
+		}
+		for _, sess := range sessions {
+			add(ResolvedServer{Name: sess.Name, Description: sess.Title, Kind: kindBoo, Session: sess.Name, WaitTimeout: wt})
+		}
+	}
+	return out
 }
 
 // ---- a2a_list tool ----
@@ -58,16 +136,17 @@ type ServerView struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Endpoint    string `json:"endpoint"`
+	Kind        string `json:"kind"`
 }
 
 type ListOutput struct {
 	Servers []ServerView `json:"servers" jsonschema:"the A2A servers available to dispatch subtasks to"`
 }
 
-func runList(reg Registry) ListOutput {
-	views := make([]ServerView, 0, len(reg.servers))
-	for _, s := range reg.servers {
-		views = append(views, ServerView{Name: s.Name, Description: s.Description, Endpoint: s.Endpoint})
+func runList(servers []ResolvedServer) ListOutput {
+	views := make([]ServerView, 0, len(servers))
+	for _, s := range servers {
+		views = append(views, ServerView{Name: s.Name, Description: s.Description, Endpoint: s.Endpoint, Kind: s.Kind})
 	}
 	return ListOutput{Servers: views}
 }
@@ -113,7 +192,7 @@ type a2aResponse struct {
 	} `json:"error"`
 }
 
-func (c *a2aClient) send(ctx context.Context, s Server, prompt string) (string, error) {
+func (c *a2aClient) send(ctx context.Context, endpoint, authToken, prompt string) (string, error) {
 	body := a2aRequest{
 		JSONRPC: "2.0",
 		ID:      newID("rpc"),
@@ -129,13 +208,13 @@ func (c *a2aClient) send(ctx context.Context, s Server, prompt string) (string, 
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.Endpoint, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.AuthToken != "" {
-		req.Header.Set("Authorization", "Bearer "+s.AuthToken)
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -203,17 +282,29 @@ type DispatchOutput struct {
 	Result string `json:"result"`
 }
 
-func runDispatch(ctx context.Context, reg Registry, c *a2aClient, in DispatchInput) (DispatchOutput, error) {
+func runDispatch(ctx context.Context, sources []Source, c *a2aClient, in DispatchInput) (DispatchOutput, error) {
 	if in.Prompt == "" {
 		return DispatchOutput{}, fmt.Errorf("prompt is required")
 	}
-	s, ok := reg.find(in.AgentName)
-	if !ok {
+	var target *ResolvedServer
+	for _, s := range resolve(ctx, sources) {
+		if s.Name == in.AgentName {
+			s := s
+			target = &s
+			break
+		}
+	}
+	if target == nil {
 		return DispatchOutput{}, fmt.Errorf("no such a2a server: %s", in.AgentName)
 	}
-	result, err := c.send(ctx, s, in.Prompt)
-	if err != nil {
-		return DispatchOutput{}, err
+	switch target.Kind {
+	case kindBoo:
+		return DispatchOutput{}, fmt.Errorf("boo dispatch not yet implemented")
+	default:
+		result, err := c.send(ctx, target.Endpoint, target.AuthToken, in.Prompt)
+		if err != nil {
+			return DispatchOutput{}, err
+		}
+		return DispatchOutput{Result: result}, nil
 	}
-	return DispatchOutput{Result: result}, nil
 }
