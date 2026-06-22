@@ -9,7 +9,6 @@ import (
 	"github.com/benenen/myclaw/internal/domain"
 	"github.com/benenen/myclaw/internal/store/models"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type MCPServerRepository struct {
@@ -22,7 +21,10 @@ func NewMCPServerRepository(db *gorm.DB) *MCPServerRepository {
 
 func (r *MCPServerRepository) Create(ctx context.Context, s domain.MCPServer) (domain.MCPServer, error) {
 	now := time.Now().UTC()
-	m := toModelMCPServer(s)
+	m, err := toModelMCPServer(s)
+	if err != nil {
+		return domain.MCPServer{}, err
+	}
 	m.CreatedAt = now
 	m.UpdatedAt = now
 	if err := r.db.WithContext(ctx).Create(&m).Error; err != nil {
@@ -59,7 +61,10 @@ func (r *MCPServerRepository) List(ctx context.Context) ([]domain.MCPServer, err
 }
 
 func (r *MCPServerRepository) Update(ctx context.Context, s domain.MCPServer) (domain.MCPServer, error) {
-	m := toModelMCPServer(s)
+	m, err := toModelMCPServer(s)
+	if err != nil {
+		return domain.MCPServer{}, err
+	}
 	m.UpdatedAt = time.Now().UTC()
 	if err := r.db.WithContext(ctx).Model(&models.MCPServer{}).Where("id = ?", s.ID).Updates(map[string]any{
 		"name":        m.Name,
@@ -91,10 +96,13 @@ func (r *MCPServerRepository) DeleteByID(ctx context.Context, id string) error {
 	})
 }
 
-func toModelMCPServer(s domain.MCPServer) models.MCPServer {
+func toModelMCPServer(s domain.MCPServer) (models.MCPServer, error) {
 	argsJSON := "[]"
 	if len(s.Args) > 0 {
-		data, _ := json.Marshal(s.Args)
+		data, err := json.Marshal(s.Args)
+		if err != nil {
+			return models.MCPServer{}, err
+		}
 		argsJSON = string(data)
 	}
 	enabled := s.Enabled
@@ -106,7 +114,7 @@ func toModelMCPServer(s domain.MCPServer) models.MCPServer {
 		Command:    s.Command,
 		ArgsJSON:   argsJSON,
 		Enabled:    &enabled,
-	}
+	}, nil
 }
 
 func toDomainMCPServer(m models.MCPServer) domain.MCPServer {
@@ -142,4 +150,5 @@ func toDomainMCPServers(rows []models.MCPServer) []domain.MCPServer {
 	return items
 }
 
-var _ = clause.OnConflict{} // placeholder: join methods + interface assertion land in Task 4
+// Per-bot join methods and the domain.MCPServerRepository interface
+// assertion are added in Task 4 (mcp_server_repository.go cont.).

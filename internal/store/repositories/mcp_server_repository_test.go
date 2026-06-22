@@ -51,3 +51,21 @@ func TestMCPServerCRUD(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestMCPServerListOrdersByName(t *testing.T) {
+	repo := newMCPRepo(t)
+	ctx := context.Background()
+	if _, err := repo.Create(ctx, domain.MCPServer{ID: "mcp_b", Name: "bravo", ServerType: "http", URL: "http://b", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Create(ctx, domain.MCPServer{ID: "mcp_a", Name: "alpha", ServerType: "http", URL: "http://a", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 2 || list[0].Name != "alpha" || list[1].Name != "bravo" {
+		t.Fatalf("expected [alpha bravo], got %+v", list)
+	}
+}
