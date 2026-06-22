@@ -32,6 +32,7 @@ func CreateBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 			ChannelType:       req.ChannelType,
 			AgentCapabilityID: req.AgentCapabilityID,
 			AgentMode:         req.AgentMode,
+			SystemPrompt:      req.SystemPrompt,
 		})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
@@ -52,6 +53,7 @@ func CreateBot(svc *botapp.BotService) stdhttp.HandlerFunc {
 			ChannelAccountID:  result.ChannelAccountID,
 			AgentCapabilityID: result.AgentCapabilityID,
 			AgentMode:         result.AgentMode,
+			SystemPrompt:      result.SystemPrompt,
 		})
 	}
 }
@@ -88,6 +90,7 @@ func ListBots(svc *botapp.BotService) stdhttp.HandlerFunc {
 				AgentMode:         item.AgentMode,
 				CLIAlias:          item.CLIAlias,
 				MCPServerIDs:      item.MCPServerIDs,
+				SystemPrompt:      item.SystemPrompt,
 			})
 		}
 		httpapi.WriteOKFromRequest(w, r, resp)
@@ -112,6 +115,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			AgentMode:         req.AgentMode,
 			CLIAlias:          req.CLIAlias,
 			MCPServerIDs:      req.MCPServerIDs,
+			SystemPrompt:      req.SystemPrompt,
 		})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
@@ -138,6 +142,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			Role:              result.Role,
 			CLIAlias:          result.CLIAlias,
 			MCPServerIDs:      result.MCPServerIDs,
+			SystemPrompt:      result.SystemPrompt,
 		})
 	}
 }
