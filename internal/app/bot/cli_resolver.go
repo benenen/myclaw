@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -121,7 +122,10 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 			log.Printf("cli session lookup failed: bot_id=%s cli=%s error=%v", botID, capability.Key, err)
 		}
 	}
-	if cfg, ok := r.buildMCPConfigJSON(ctx, botID); ok {
+	entries := r.collectMCPServers(ctx, botID)
+	if capability.Key == "codex" {
+		spec.Args = append(spec.Args, codexMCPArgs(entries)...)
+	} else if cfg, ok := mcpConfigJSON(entries); ok {
 		spec.Args = append(spec.Args, "--mcp-config", cfg)
 	}
 	if bot.Role == domain.BotRoleOrchestrator {
@@ -136,41 +140,77 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 	return spec, nil
 }
 
-func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) (string, bool) {
-	mcpServers := map[string]any{}
+type mcpEntry struct {
+	Name, ServerType, URL, Command string
+	Args                           []string
+}
+
+func (r *BotCLIResolver) collectMCPServers(ctx context.Context, botID string) []mcpEntry {
+	var out []mcpEntry
 	if r.mcpURL != "" {
-		mcpServers["myclaw"] = map[string]any{"type": "http", "url": r.mcpURL}
+		out = append(out, mcpEntry{Name: "myclaw", ServerType: mcpserver.TypeHTTP, URL: r.mcpURL})
 	}
 	if r.mcpServers != nil {
 		servers, err := r.mcpServers.ListEnabledByBot(ctx, botID)
 		if err != nil {
 			log.Printf("mcp server list failed for bot %s: %v", botID, err)
 		} else {
-			for _, srv := range servers {
-				cfg := map[string]any{"type": srv.ServerType}
-				switch srv.ServerType {
-				case mcpserver.TypeHTTP:
-					cfg["url"] = srv.URL
-				case mcpserver.TypeStdio:
-					args := srv.Args
-					if args == nil {
-						args = []string{}
-					}
-					cfg["command"] = srv.Command
-					cfg["args"] = args
-				default:
-					log.Printf("unknown mcp server type %q for %q, skipping", srv.ServerType, srv.Name)
-					continue
-				}
-				mcpServers[srv.Name] = cfg
+			for _, s := range servers {
+				out = append(out, mcpEntry{Name: s.Name, ServerType: s.ServerType, URL: s.URL, Command: s.Command, Args: s.Args})
 			}
 		}
 	}
-	if len(mcpServers) == 0 {
+	return out
+}
+
+// mcpConfigJSON renders the claude/opencode --mcp-config value (all types).
+func mcpConfigJSON(entries []mcpEntry) (string, bool) {
+	servers := map[string]any{}
+	for _, e := range entries {
+		cfg := map[string]any{"type": e.ServerType}
+		switch e.ServerType {
+		case mcpserver.TypeHTTP:
+			cfg["url"] = e.URL
+		case mcpserver.TypeStdio:
+			args := e.Args
+			if args == nil {
+				args = []string{}
+			}
+			cfg["command"] = e.Command
+			cfg["args"] = args
+		default:
+			continue
+		}
+		servers[e.Name] = cfg
+	}
+	if len(servers) == 0 {
 		return "", false
 	}
-	data, _ := json.Marshal(map[string]any{"mcpServers": mcpServers})
+	data, _ := json.Marshal(map[string]any{"mcpServers": servers})
 	return string(data), true
+}
+
+// codexMCPArgs renders `-c mcp_servers.*` overrides for STDIO servers (codex has
+// no --mcp-config; http servers are skipped — codex injection is stdio-only here).
+func codexMCPArgs(entries []mcpEntry) []string {
+	var args []string
+	for _, e := range entries {
+		if e.ServerType != mcpserver.TypeStdio {
+			if e.ServerType == mcpserver.TypeHTTP {
+				log.Printf("codex: skipping http mcp server %q (stdio-only injection)", e.Name)
+			}
+			continue
+		}
+		argsJSON, _ := json.Marshal(e.Args)
+		if e.Args == nil {
+			argsJSON = []byte("[]")
+		}
+		args = append(args,
+			"-c", fmt.Sprintf("mcp_servers.%s.command=%q", e.Name, e.Command),
+			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", e.Name, string(argsJSON)),
+		)
+	}
+	return args
 }
 
 func (r *BotCLIResolver) timeoutForMode(mode string) time.Duration {
