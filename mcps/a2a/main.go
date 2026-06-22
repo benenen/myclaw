@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -31,6 +33,37 @@ func main() {
 			out, err := runDispatch(ctx, sources, client, in)
 			return nil, out, err
 		})
+	server.AddResource(&mcp.Resource{
+		URI:         "boo://sessions",
+		Name:        "boo-sessions",
+		Title:       "Live boo sessions",
+		Description: "Live boo sessions you can route subtasks to. Read boo://session/<name> for one session's capabilities.",
+		MIMEType:    "application/json",
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		data, _ := json.Marshal(map[string]any{"sessions": booRoster(ctx)})
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+			{URI: "boo://sessions", MIMEType: "application/json", Text: string(data)},
+		}}, nil
+	})
+
+	server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "boo://session/{name}",
+		Name:        "boo-session",
+		Title:       "boo session detail",
+		Description: "Capabilities + live status of one boo session.",
+		MIMEType:    "application/json",
+	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		name := strings.TrimPrefix(req.Params.URI, "boo://session/")
+		detail, ok := booSessionDetail(ctx, name)
+		if !ok {
+			return nil, mcp.ResourceNotFoundError(req.Params.URI)
+		}
+		data, _ := json.Marshal(detail)
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+			{URI: req.Params.URI, MIMEType: "application/json", Text: string(data)},
+		}}, nil
+	})
+
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatalf("a2a mcp server: %v", err)
 	}

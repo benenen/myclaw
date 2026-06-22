@@ -79,8 +79,9 @@ var runBoo = func(ctx context.Context, args ...string) (stdout []byte, exitCode 
 }
 
 type booSession struct {
-	Name  string `json:"name"`
-	Title string `json:"title"`
+	Name   string `json:"name"`
+	Title  string `json:"title"`
+	IdleMS int64  `json:"idle_ms"`
 }
 
 // booConfigDir is where boo keeps per-session restore snapshots (<session>.state).
@@ -136,6 +137,51 @@ func booCapabilitiesDescription(cwd string) (string, bool) {
 		return "", false
 	}
 	return desc, true
+}
+
+// booRoster returns the live boo sessions (empty on any error).
+func booRoster(ctx context.Context) []booSession {
+	stdout, code, err := runBoo(ctx, "ls", "--json")
+	if err != nil || code != 0 {
+		log.Printf("a2a: boo ls failed (code=%d): %v", code, err)
+		return []booSession{}
+	}
+	var sessions []booSession
+	if err := json.Unmarshal(stdout, &sessions); err != nil {
+		log.Printf("a2a: boo ls --json parse failed: %v", err)
+		return []booSession{}
+	}
+	if sessions == nil {
+		sessions = []booSession{}
+	}
+	return sessions
+}
+
+// SessionDetail is the read payload for a single boo session resource.
+type SessionDetail struct {
+	Name       string `json:"name"`
+	Title      string `json:"title"`
+	IdleMS     int64  `json:"idle_ms"`
+	Cwd        string `json:"cwd"`
+	Capability string `json:"capability"`
+}
+
+// booSessionDetail returns one live session's detail (false if not a live session).
+func booSessionDetail(ctx context.Context, name string) (SessionDetail, bool) {
+	for _, s := range booRoster(ctx) {
+		if s.Name != name {
+			continue
+		}
+		d := SessionDetail{Name: s.Name, Title: s.Title, IdleMS: s.IdleMS}
+		if cwd, ok := booSessionCwd(name); ok {
+			d.Cwd = cwd
+			if cap, ok := booCapabilitiesDescription(cwd); ok {
+				d.Capability = cap
+			}
+		}
+		return d, true
+	}
+	return SessionDetail{}, false
 }
 
 // resolve expands sources into live servers. http passes through; a boo source
