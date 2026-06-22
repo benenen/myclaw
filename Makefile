@@ -14,3 +14,16 @@ watch:
 		GOBIN=$$(go env GOPATH)/bin go install github.com/air-verse/air@latest && \
 		PATH="$$PATH:$$(go env GOPATH)/bin" CHANNEL_MASTER_KEY=$(CHANNEL_MASTER_KEY) air; \
 	fi
+
+mcp-echo:
+	go build -o bin/mcp-echo ./mcps/echo
+
+mcp-ping:
+	go build -o bin/mcp-ping ./mcps/ping
+
+mcps: mcp-echo mcp-ping
+
+test-mcps:
+	go test ./mcps/echo/... ./mcps/ping/...
+
+.PHONY: test run watch mcp-echo mcp-ping mcps test-mcps
