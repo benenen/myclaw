@@ -135,6 +135,10 @@
                 <label for="detail-agent-mcp">MCP servers</label>
                 <select id="detail-agent-mcp" multiple size="4"></select>
               </div>
+              <div class="form-field wide">
+                <label for="detail-agent-system-prompt">System prompt <span style="opacity:.6">(optional)</span></label>
+                <textarea id="detail-agent-system-prompt" rows="6" placeholder="Written to AGENTS.md (codex/opencode) or CLAUDE.md (claude) in the bot workspace on launch."></textarea>
+              </div>
               <div class="form-field action">
                 <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
               </div>
