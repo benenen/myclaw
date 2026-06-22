@@ -121,34 +121,30 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 			log.Printf("cli session lookup failed: bot_id=%s cli=%s error=%v", botID, capability.Key, err)
 		}
 	}
+	if cfg, ok := r.buildMCPConfigJSON(ctx, botID); ok {
+		spec.Args = append(spec.Args, "--mcp-config", cfg)
+	}
 	if bot.Role == domain.BotRoleOrchestrator {
 		spec.Orchestrator = true
 		if r.orchestratorTimeout > 0 {
 			spec.Timeout = r.orchestratorTimeout
 		}
-		extra := []string{}
-		if r.mcpURL != "" {
-			extra = append(extra, "--mcp-config", r.buildMCPConfigJSON(ctx, botID))
-		}
 		if r.orchestratorPrompt != "" {
-			extra = append(extra, "--append-system-prompt", r.orchestratorPrompt)
+			spec.Args = append(spec.Args, "--append-system-prompt", r.orchestratorPrompt)
 		}
-		spec.Args = append(spec.Args, extra...)
 	}
 	return spec, nil
 }
 
-func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) string {
-	mcpServers := map[string]any{
-		"myclaw": map[string]any{
-			"type": "http",
-			"url":  r.mcpURL,
-		},
+func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) (string, bool) {
+	mcpServers := map[string]any{}
+	if r.mcpURL != "" {
+		mcpServers["myclaw"] = map[string]any{"type": "http", "url": r.mcpURL}
 	}
 	if r.mcpServers != nil {
 		servers, err := r.mcpServers.ListEnabledByBot(ctx, botID)
 		if err != nil {
-			log.Printf("mcp server list failed for bot %s, using only myclaw: %v", botID, err)
+			log.Printf("mcp server list failed for bot %s: %v", botID, err)
 		} else {
 			for _, srv := range servers {
 				cfg := map[string]any{"type": srv.ServerType}
@@ -170,8 +166,11 @@ func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) s
 			}
 		}
 	}
+	if len(mcpServers) == 0 {
+		return "", false
+	}
 	data, _ := json.Marshal(map[string]any{"mcpServers": mcpServers})
-	return string(data)
+	return string(data), true
 }
 
 func (r *BotCLIResolver) timeoutForMode(mode string) time.Duration {
