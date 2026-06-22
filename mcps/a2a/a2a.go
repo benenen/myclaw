@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -82,6 +83,61 @@ type booSession struct {
 	Title string `json:"title"`
 }
 
+// booConfigDir is where boo keeps per-session restore snapshots (<session>.state).
+func booConfigDir() string {
+	if c := os.Getenv("BOO_CONFIG"); c != "" {
+		return filepath.Dir(c)
+	}
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+		return filepath.Join(x, "boo")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".config/boo"
+	}
+	return filepath.Join(home, ".config", "boo")
+}
+
+// booSessionCwd reads the session's saved working directory from its snapshot.
+func booSessionCwd(session string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(booConfigDir(), session+".state"))
+	if err != nil {
+		return "", false
+	}
+	cwd := strings.TrimSpace(string(data))
+	if cwd == "" {
+		return "", false
+	}
+	return cwd, true
+}
+
+// booCapabilitiesDescription reads <cwd>/boo.capabilities.json and renders a
+// description (with skills appended). Returns ("", false) if absent/invalid/empty.
+func booCapabilitiesDescription(cwd string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(cwd, "boo.capabilities.json"))
+	if err != nil {
+		return "", false
+	}
+	var c struct {
+		Description string   `json:"description"`
+		Skills      []string `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		return "", false
+	}
+	desc := strings.TrimSpace(c.Description)
+	if len(c.Skills) > 0 {
+		if desc != "" {
+			desc += " "
+		}
+		desc += "[skills: " + strings.Join(c.Skills, ", ") + "]"
+	}
+	if desc == "" {
+		return "", false
+	}
+	return desc, true
+}
+
 // resolve expands sources into live servers. http passes through; a boo source
 // runs `boo ls --json` and emits one server per session. boo failures are logged
 // and skipped (http sources still resolve). Duplicate names are dropped (first wins).
@@ -122,7 +178,13 @@ func resolve(ctx context.Context, sources []Source) []ResolvedServer {
 			wt = "60s"
 		}
 		for _, sess := range sessions {
-			add(ResolvedServer{Name: sess.Name, Description: sess.Title, Kind: kindBoo, Session: sess.Name, WaitTimeout: wt})
+			desc := sess.Title
+			if cwd, ok := booSessionCwd(sess.Name); ok {
+				if cap, ok := booCapabilitiesDescription(cwd); ok {
+					desc = cap
+				}
+			}
+			add(ResolvedServer{Name: sess.Name, Description: desc, Kind: kindBoo, Session: sess.Name, WaitTimeout: wt})
 		}
 	}
 	return out

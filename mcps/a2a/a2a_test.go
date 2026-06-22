@@ -231,3 +231,100 @@ func TestRunDispatchNon2xx(t *testing.T) {
 		t.Fatal("expected non-2xx error")
 	}
 }
+
+func TestBooConfigDir(t *testing.T) {
+	t.Setenv("BOO_CONFIG", "/x/conf.toml")
+	t.Setenv("XDG_CONFIG_HOME", "/y")
+	if d := booConfigDir(); d != "/x" {
+		t.Fatalf("BOO_CONFIG dir = %q, want /x", d)
+	}
+	t.Setenv("BOO_CONFIG", "")
+	if d := booConfigDir(); d != "/y/boo" {
+		t.Fatalf("XDG dir = %q, want /y/boo", d)
+	}
+	// Home fallback: both BOO_CONFIG and XDG_CONFIG_HOME unset.
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".config", "boo")
+	if d := booConfigDir(); d != want {
+		t.Fatalf("home fallback = %q, want %q", d, want)
+	}
+}
+
+func TestBooSessionCwd(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	os.MkdirAll(filepath.Join(tmp, "boo"), 0o755)
+	os.WriteFile(filepath.Join(tmp, "boo", "build.state"), []byte("/home/me/proj\n"), 0o600)
+
+	cwd, ok := booSessionCwd("build")
+	if !ok || cwd != "/home/me/proj" {
+		t.Fatalf("cwd=%q ok=%v", cwd, ok)
+	}
+	if _, ok := booSessionCwd("ghost"); ok {
+		t.Fatal("missing .state should be !ok")
+	}
+}
+
+func TestBooCapabilitiesDescription(t *testing.T) {
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "boo.capabilities.json"),
+		[]byte(`{"description":"coding agent","skills":["go","testing"]}`), 0o600)
+	got, ok := booCapabilitiesDescription(cwd)
+	if !ok || got != "coding agent [skills: go, testing]" {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+
+	cwd2 := t.TempDir()
+	os.WriteFile(filepath.Join(cwd2, "boo.capabilities.json"), []byte(`{"description":"plain"}`), 0o600)
+	if got, ok := booCapabilitiesDescription(cwd2); !ok || got != "plain" {
+		t.Fatalf("plain: got %q ok=%v", got, ok)
+	}
+
+	if _, ok := booCapabilitiesDescription(t.TempDir()); ok {
+		t.Fatal("missing file should be !ok")
+	}
+	bad := t.TempDir()
+	os.WriteFile(filepath.Join(bad, "boo.capabilities.json"), []byte(`{not json`), 0o600)
+	if _, ok := booCapabilitiesDescription(bad); ok {
+		t.Fatal("invalid json should be !ok")
+	}
+	// Empty object: present but no description/skills → ("", false).
+	empty := t.TempDir()
+	os.WriteFile(filepath.Join(empty, "boo.capabilities.json"), []byte(`{}`), 0o600)
+	if got, ok := booCapabilitiesDescription(empty); ok || got != "" {
+		t.Fatalf("empty object: got %q ok=%v, want (\"\", false)", got, ok)
+	}
+}
+
+func TestResolveBooEnrichesDescriptionFromCapabilities(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"bash"}]`), 0, nil
+	})()
+	tmp := t.TempDir()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	cwd := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, "boo"), 0o755)
+	os.WriteFile(filepath.Join(tmp, "boo", "build.state"), []byte(cwd+"\n"), 0o600)
+	os.WriteFile(filepath.Join(cwd, "boo.capabilities.json"), []byte(`{"description":"go coder"}`), 0o600)
+
+	got := resolve(context.Background(), []Source{{Kind: "boo"}})
+	if len(got) != 1 || got[0].Description != "go coder" {
+		t.Fatalf("enriched: %+v", got)
+	}
+}
+
+func TestResolveBooFallsBackToTitleWhenNoCapabilities(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"the title"}]`), 0, nil
+	})()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty boo dir → no .state
+	got := resolve(context.Background(), []Source{{Kind: "boo"}})
+	if len(got) != 1 || got[0].Description != "the title" {
+		t.Fatalf("fallback: %+v", got)
+	}
+}
