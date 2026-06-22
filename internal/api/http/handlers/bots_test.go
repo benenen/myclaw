@@ -8,6 +8,7 @@ import (
 
 	httpapi "github.com/benenen/myclaw/internal/api/http"
 	"github.com/benenen/myclaw/internal/app/bot"
+	"github.com/benenen/myclaw/internal/app/mcpserver"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/security"
@@ -34,9 +35,10 @@ func newTestServerWithProvider(t *testing.T) (*wechat.FakeProvider, stdhttp.Hand
 	bindingRepo := repositories.NewChannelBindingRepository(db)
 	accountRepo := repositories.NewChannelAccountRepository(db)
 	botRepo := repositories.NewBotRepository(db)
+	mcpSvc := mcpserver.NewService(repositories.NewMCPServerRepository(db), botRepo)
 	mux := stdhttp.NewServeMux()
 	RegisterRoutes(mux, Dependencies{
-		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, nil)),
+		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, nil), mcpSvc),
 	})
 	return provider, mux
 }
@@ -300,10 +302,11 @@ func newTestServerWithCustomProvider(t *testing.T, provider channel.Provider) st
 	bindingRepo := repositories.NewChannelBindingRepository(db)
 	accountRepo := repositories.NewChannelAccountRepository(db)
 	botRepo := repositories.NewBotRepository(db)
+	mcpSvc := mcpserver.NewService(repositories.NewMCPServerRepository(db), botRepo)
 	starter, _ := provider.(channel.RuntimeStarter)
 	mux := stdhttp.NewServeMux()
 	RegisterRoutes(mux, Dependencies{
-		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, starter, cipher, nil)),
+		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, starter, cipher, nil), mcpSvc),
 	})
 	return mux
 }
@@ -328,5 +331,87 @@ func TestConnectBotPassesFeishuCredentials(t *testing.T) {
 	}
 	if provider.refreshConfig["app_id"] != "cli_x" || provider.refreshConfig["app_secret"] != "secret" {
 		t.Fatalf("provider did not receive creds: %#v", provider.refreshConfig)
+	}
+}
+
+func TestConfigureBotAgentPersistsMCPServerIDs(t *testing.T) {
+	// Build a shared DB so both the MCP service and BotService share state.
+	db := testutil.OpenTestDB(t)
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	cipher, _ := security.NewCipher(key)
+	provider := wechat.NewFakeProvider()
+	userRepo := repositories.NewUserRepository(db)
+	bindingRepo := repositories.NewChannelBindingRepository(db)
+	accountRepo := repositories.NewChannelAccountRepository(db)
+	botRepo := repositories.NewBotRepository(db)
+	mcpSvc := mcpserver.NewService(repositories.NewMCPServerRepository(db), botRepo)
+	mux := stdhttp.NewServeMux()
+	RegisterRoutes(mux, Dependencies{
+		BotService: bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, repositories.NewAgentCapabilityRepository(db), cipher, provider, bot.NewBotConnectionManagerWithCipher(botRepo, accountRepo, provider, cipher, nil), mcpSvc),
+	})
+	ts := mux
+
+	// Seed one catalog MCP server.
+	srv, err := mcpSvc.Create(context.Background(), mcpserver.CreateInput{
+		Name:       "test-mcp",
+		ServerType: "http",
+		URL:        "http://localhost:9999",
+	})
+	if err != nil {
+		t.Fatalf("create mcp server: %v", err)
+	}
+
+	// Create a bot.
+	createRes := testutil.PostJSON(t, ts, "/api/v1/bots/create", `{"user_id":"u_mcp","name":"mcp-bot","channel_type":"wechat"}`)
+	if createRes.Code != stdhttp.StatusOK {
+		t.Fatalf("create bot status %d: %s", createRes.Code, createRes.Body.String())
+	}
+	var createEnv httpapi.Envelope
+	if err := json.Unmarshal(createRes.Body.Bytes(), &createEnv); err != nil {
+		t.Fatal(err)
+	}
+	botID := createEnv.Data.(map[string]any)["bot_id"].(string)
+
+	// Configure bot agent with the MCP server ID.
+	body := `{"bot_id":"` + botID + `","agent_capability_id":"cap_claude","agent_mode":"session","mcp_server_ids":["` + srv.ID + `"]}`
+	res := testutil.PostJSON(t, ts, "/api/v1/bots/agent", body)
+	if res.Code != stdhttp.StatusOK {
+		t.Fatalf("agent status %d: %s", res.Code, res.Body.String())
+	}
+	var env httpapi.Envelope
+	if err := json.Unmarshal(res.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Code != "OK" {
+		t.Fatalf("unexpected code: %s", env.Code)
+	}
+	data := env.Data.(map[string]any)
+	ids, ok := data["mcp_server_ids"].([]any)
+	if !ok || len(ids) != 1 {
+		t.Fatalf("mcp_server_ids in response = %v, want [%s]", data["mcp_server_ids"], srv.ID)
+	}
+	if ids[0].(string) != srv.ID {
+		t.Fatalf("mcp_server_ids[0] = %v, want %s", ids[0], srv.ID)
+	}
+
+	// GET /api/v1/mcp-servers should return the catalog server.
+	listRes := testutil.GetJSON(t, ts, "/api/v1/mcp-servers")
+	var listEnv httpapi.Envelope
+	if err := json.Unmarshal(listRes.Body.Bytes(), &listEnv); err != nil {
+		t.Fatalf("parse mcp-servers response: %v (body=%s)", err, listRes.Body.String())
+	}
+	if listEnv.Code != "OK" {
+		t.Fatalf("mcp-servers code = %s, want OK", listEnv.Code)
+	}
+	catalog, ok := listEnv.Data.([]any)
+	if !ok || len(catalog) != 1 {
+		t.Fatalf("mcp catalog = %v, want 1 item", listEnv.Data)
+	}
+	catalogItem := catalog[0].(map[string]any)
+	if catalogItem["id"].(string) != srv.ID {
+		t.Fatalf("catalog item id = %v, want %s", catalogItem["id"], srv.ID)
 	}
 }

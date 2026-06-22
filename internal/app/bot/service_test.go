@@ -59,6 +59,7 @@ func newTestBotServiceWithRuntimeStarter(t *testing.T, starter channel.RuntimeSt
 		cipher,
 		provider,
 		runtimes,
+		nil,
 	), baseProvider
 }
 
@@ -84,6 +85,7 @@ func newTestBotServiceWithProvider(t *testing.T, provider channel.Provider) *Bot
 		cipher,
 		provider,
 		runtimes,
+		nil,
 	)
 }
 

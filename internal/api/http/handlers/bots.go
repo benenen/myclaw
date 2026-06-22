@@ -87,6 +87,7 @@ func ListBots(svc *botapp.BotService) stdhttp.HandlerFunc {
 				AgentCapabilityID: item.AgentCapabilityID,
 				AgentMode:         item.AgentMode,
 				CLIAlias:          item.CLIAlias,
+				MCPServerIDs:      item.MCPServerIDs,
 			})
 		}
 		httpapi.WriteOKFromRequest(w, r, resp)
@@ -110,6 +111,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			AgentCapabilityID: req.AgentCapabilityID,
 			AgentMode:         req.AgentMode,
 			CLIAlias:          req.CLIAlias,
+			MCPServerIDs:      req.MCPServerIDs,
 		})
 		if err != nil {
 			if errors.Is(err, domain.ErrInvalidArg) {
@@ -135,6 +137,7 @@ func ConfigureBotAgent(svc *botapp.BotService) stdhttp.HandlerFunc {
 			AgentMode:         result.AgentMode,
 			Role:              result.Role,
 			CLIAlias:          result.CLIAlias,
+			MCPServerIDs:      result.MCPServerIDs,
 		})
 	}
 }
@@ -260,6 +263,21 @@ func SimulateBotMessage(svc MessageSimulator) stdhttp.HandlerFunc {
 			MessageID:   result.MessageID,
 			RecipientID: result.RecipientID,
 		})
+	}
+}
+
+func ListMCPServers(svc *botapp.BotService) stdhttp.HandlerFunc {
+	return func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		servers, err := svc.ListMCPServers(r.Context())
+		if err != nil {
+			httpapi.WriteError(w, r, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		out := make([]dto.MCPServerResponse, 0, len(servers))
+		for _, s := range servers {
+			out = append(out, dto.MCPServerResponse{ID: s.ID, Name: s.Name, ServerType: s.ServerType, Enabled: s.Enabled})
+		}
+		httpapi.WriteOKFromRequest(w, r, out)
 	}
 }
 

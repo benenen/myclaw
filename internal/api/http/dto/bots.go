@@ -23,26 +23,35 @@ type CreateBotResponse struct {
 }
 
 type BotResponse struct {
-	BotID             string `json:"bot_id"`
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	Role              string `json:"role,omitempty"`
-	ChannelType       string `json:"channel_type"`
-	ConnectionStatus  string `json:"connection_status"`
-	ChannelAccountID  string `json:"channel_account_id,omitempty"`
-	AgentCapabilityID string `json:"agent_capability_id,omitempty"`
-	AgentMode         string `json:"agent_mode,omitempty"`
-	CLIAlias          string `json:"cli_alias,omitempty"`
+	BotID             string   `json:"bot_id"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	Role              string   `json:"role,omitempty"`
+	ChannelType       string   `json:"channel_type"`
+	ConnectionStatus  string   `json:"connection_status"`
+	ChannelAccountID  string   `json:"channel_account_id,omitempty"`
+	AgentCapabilityID string   `json:"agent_capability_id,omitempty"`
+	AgentMode         string   `json:"agent_mode,omitempty"`
+	CLIAlias          string   `json:"cli_alias,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids"`
 }
 
 type ConfigureBotAgentRequest struct {
-	BotID             string `json:"bot_id"`
-	AgentCapabilityID string `json:"agent_capability_id"`
-	AgentMode         string `json:"agent_mode"`
-	CLIAlias          string `json:"cli_alias,omitempty"`
+	BotID             string   `json:"bot_id"`
+	AgentCapabilityID string   `json:"agent_capability_id"`
+	AgentMode         string   `json:"agent_mode"`
+	CLIAlias          string   `json:"cli_alias,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 }
 
 type ConfigureBotAgentResponse = BotResponse
+
+type MCPServerResponse struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	ServerType string `json:"server_type"`
+	Enabled    bool   `json:"enabled"`
+}
 
 type ConnectBotRequest struct {
 	BotID     string `json:"bot_id"`
