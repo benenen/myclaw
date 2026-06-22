@@ -143,11 +143,16 @@ func booCapabilitiesDescription(cwd string) (string, bool) {
 func booRoster(ctx context.Context) []booSession {
 	stdout, code, err := runBoo(ctx, "ls", "--json")
 	if err != nil || code != 0 {
-		return nil
+		log.Printf("a2a: boo ls failed (code=%d): %v", code, err)
+		return []booSession{}
 	}
 	var sessions []booSession
 	if err := json.Unmarshal(stdout, &sessions); err != nil {
-		return nil
+		log.Printf("a2a: boo ls --json parse failed: %v", err)
+		return []booSession{}
+	}
+	if sessions == nil {
+		sessions = []booSession{}
 	}
 	return sessions
 }

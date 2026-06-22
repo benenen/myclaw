@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -341,12 +342,16 @@ func TestBooRosterParsesSessions(t *testing.T) {
 
 func TestBooRosterEmptyOnFailure(t *testing.T) {
 	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 1, nil })()
-	if got := booRoster(context.Background()); len(got) != 0 {
-		t.Fatalf("want empty on ls failure, got %+v", got)
+	if got := booRoster(context.Background()); got == nil || len(got) != 0 {
+		t.Fatalf("want non-nil empty on ls failure, got %#v", got)
 	}
 	defer stubBoo(func(args ...string) ([]byte, int, error) { return []byte(`{bad`), 0, nil })()
-	if got := booRoster(context.Background()); len(got) != 0 {
-		t.Fatalf("want empty on bad json, got %+v", got)
+	if got := booRoster(context.Background()); got == nil || len(got) != 0 {
+		t.Fatalf("want non-nil empty on bad json, got %#v", got)
+	}
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 0, errors.New("exec fail") })()
+	if got := booRoster(context.Background()); got == nil || len(got) != 0 {
+		t.Fatalf("want non-nil empty on exec error, got %#v", got)
 	}
 }
 
