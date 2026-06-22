@@ -8,6 +8,7 @@ type CreateBotRequest struct {
 	ChannelType       string `json:"channel_type"`
 	AgentCapabilityID string `json:"agent_capability_id,omitempty"`
 	AgentMode         string `json:"agent_mode,omitempty"`
+	SystemPrompt      string `json:"system_prompt,omitempty"`
 }
 
 type CreateBotResponse struct {
@@ -20,6 +21,7 @@ type CreateBotResponse struct {
 	ChannelAccountID  string `json:"channel_account_id,omitempty"`
 	AgentCapabilityID string `json:"agent_capability_id,omitempty"`
 	AgentMode         string `json:"agent_mode,omitempty"`
+	SystemPrompt      string `json:"system_prompt,omitempty"`
 }
 
 type BotResponse struct {
@@ -34,6 +36,7 @@ type BotResponse struct {
 	AgentMode         string   `json:"agent_mode,omitempty"`
 	CLIAlias          string   `json:"cli_alias,omitempty"`
 	MCPServerIDs      []string `json:"mcp_server_ids"`
+	SystemPrompt      string   `json:"system_prompt,omitempty"`
 }
 
 type ConfigureBotAgentRequest struct {
@@ -42,6 +45,7 @@ type ConfigureBotAgentRequest struct {
 	AgentMode         string   `json:"agent_mode"`
 	CLIAlias          string   `json:"cli_alias,omitempty"`
 	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
+	SystemPrompt      string   `json:"system_prompt,omitempty"`
 }
 
 type ConfigureBotAgentResponse = BotResponse

@@ -71,6 +71,7 @@ type Bot struct {
 	Role              string
 	CLIAlias          string
 	Workspace         string
+	SystemPrompt      string
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time

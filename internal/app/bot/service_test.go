@@ -774,6 +774,39 @@ func TestStartLoginThreadsConfigForAutoConfirmChannel(t *testing.T) {
 	}
 }
 
+func TestBotServiceConfigureBotAgentSystemPrompt(t *testing.T) {
+	svc := newTestBotService(t)
+	created, err := svc.CreateBot(context.Background(), CreateBotInput{
+		ExternalUserID: "u_sp",
+		Name:           "router",
+		ChannelType:    "feishu",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := svc.ConfigureBotAgent(context.Background(), ConfigureBotAgentInput{
+		BotID:             created.BotID,
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
+		SystemPrompt:      "  you are a router  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SystemPrompt != "you are a router" {
+		t.Fatalf("returned system_prompt = %q (want trimmed)", updated.SystemPrompt)
+	}
+
+	stored, err := svc.bots.GetByID(context.Background(), created.BotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.SystemPrompt != "you are a router" {
+		t.Fatalf("stored system_prompt = %q", stored.SystemPrompt)
+	}
+}
+
 func TestBotServiceRefreshLoginMarksBotErrorOnProviderFailure(t *testing.T) {
 	svc := newTestBotService(t)
 	bot, err := svc.CreateBot(context.Background(), CreateBotInput{

@@ -359,3 +359,41 @@ func TestBotRepositoryDeleteByID(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestBotRepositorySystemPromptRoundTrip(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+
+	created, err := repo.Create(ctx, domain.Bot{
+		ID:               "bot_sp",
+		UserID:           "usr_1",
+		Name:             "router",
+		ChannelType:      "feishu",
+		ConnectionStatus: domain.BotConnectionStatusLoginRequired,
+		SystemPrompt:     "you are a router",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SystemPrompt != "you are a router" {
+		t.Fatalf("create system_prompt = %q", created.SystemPrompt)
+	}
+
+	got, err := repo.GetByID(ctx, "bot_sp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SystemPrompt != "you are a router" {
+		t.Fatalf("get system_prompt = %q", got.SystemPrompt)
+	}
+
+	got.SystemPrompt = ""
+	updated, err := repo.Update(ctx, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.SystemPrompt != "" {
+		t.Fatalf("after clear system_prompt = %q", updated.SystemPrompt)
+	}
+}

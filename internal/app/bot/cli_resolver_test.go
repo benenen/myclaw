@@ -613,6 +613,117 @@ func TestResolveClaudeStillUsesMcpConfig(t *testing.T) {
 	}
 }
 
+func TestResolveWritesSystemPromptToAgentsForCodex(t *testing.T) {
+	ws := t.TempDir()
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_sp",
+		Name:              "router",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
+		Workspace:         ws,
+		SystemPrompt:      "route everything",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "/usr/local/bin/codex", SupportedModes: []string{"codex-exec"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{Timeout: time.Minute})
+
+	if _, err := r.Resolve(context.Background(), "bot_sp"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(ws, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md not written: %v", err)
+	}
+	if string(got) != "route everything" {
+		t.Fatalf("AGENTS.md content = %q", string(got))
+	}
+	if _, err := os.Stat(filepath.Join(ws, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatal("CLAUDE.md must not exist for codex")
+	}
+}
+
+func TestResolveWritesSystemPromptToClaudeMdForClaude(t *testing.T) {
+	ws := t.TempDir()
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_sp",
+		Name:              "router",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		Workspace:         ws,
+		SystemPrompt:      "claude router",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {ID: "cap_claude", Key: "claude", Command: "/usr/local/bin/claude", SupportedModes: []string{"session"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{Timeout: time.Minute})
+
+	if _, err := r.Resolve(context.Background(), "bot_sp"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(ws, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("CLAUDE.md not written: %v", err)
+	}
+	if string(got) != "claude router" {
+		t.Fatalf("CLAUDE.md content = %q", string(got))
+	}
+}
+
+func TestResolveEmptySystemPromptRemovesDocFile(t *testing.T) {
+	ws := t.TempDir()
+	stale := filepath.Join(ws, "AGENTS.md")
+	if err := os.WriteFile(stale, []byte("old prompt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_sp",
+		Name:              "router",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
+		Workspace:         ws,
+		SystemPrompt:      "",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "/usr/local/bin/codex", SupportedModes: []string{"codex-exec"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{Timeout: time.Minute})
+
+	if _, err := r.Resolve(context.Background(), "bot_sp"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatal("empty prompt should have removed AGENTS.md")
+	}
+}
+
+func TestResolveOverwritesExistingDocFile(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "AGENTS.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_sp",
+		Name:              "router",
+		AgentCapabilityID: "cap_codex",
+		AgentMode:         "codex-exec",
+		Workspace:         ws,
+		SystemPrompt:      "new prompt",
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "/usr/local/bin/codex", SupportedModes: []string{"codex-exec"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{Timeout: time.Minute})
+
+	if _, err := r.Resolve(context.Background(), "bot_sp"); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	got, _ := os.ReadFile(filepath.Join(ws, "AGENTS.md"))
+	if string(got) != "new prompt" {
+		t.Fatalf("AGENTS.md content = %q", string(got))
+	}
+}
+
 type agentSessionRepoStub struct {
 	byKey map[string]domain.BotCLISession // key = botID + "|" + cliType
 }
