@@ -114,6 +114,11 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 			return agent.Spec{}, err
 		}
 	}
+	if spec.WorkDir != "" {
+		if err := writeSystemPromptDoc(spec.WorkDir, capability.Key, bot.SystemPrompt); err != nil {
+			return agent.Spec{}, err
+		}
+	}
 	if r.sessions != nil {
 		if stored, err := r.sessions.Get(ctx, botID, capability.Key); err == nil {
 			spec.ResumeSessionID = stored.SessionID
@@ -138,6 +143,24 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 		}
 	}
 	return spec, nil
+}
+
+// writeSystemPromptDoc materializes the bot's system prompt into the CLI's native
+// instruction file in the workspace (claude → CLAUDE.md, else → AGENTS.md). myclaw
+// fully owns the file: a non-empty prompt overwrites it; an empty prompt removes it.
+func writeSystemPromptDoc(workDir, cliKey, prompt string) error {
+	docFile := "AGENTS.md"
+	if cliKey == "claude" {
+		docFile = "CLAUDE.md"
+	}
+	path := filepath.Join(workDir, docFile)
+	if strings.TrimSpace(prompt) != "" {
+		return os.WriteFile(path, []byte(prompt), 0o644)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 type mcpEntry struct {
