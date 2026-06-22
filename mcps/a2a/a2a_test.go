@@ -120,3 +120,15 @@ func TestRunDispatchNon2xx(t *testing.T) {
 		t.Fatal("expected non-2xx error")
 	}
 }
+
+func TestRunDispatchArtifactResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"result":{"kind":"task","artifacts":[{"parts":[{"kind":"text","text":"artifact-answer"}]}]}}`))
+	}))
+	defer srv.Close()
+	reg := Registry{servers: []Server{{Name: "w", Endpoint: srv.URL}}}
+	out, err := runDispatch(context.Background(), reg, newA2AClient(srv.Client()), DispatchInput{AgentName: "w", Prompt: "hi"})
+	if err != nil || out.Result != "artifact-answer" {
+		t.Fatalf("got %+v err %v", out, err)
+	}
+}
