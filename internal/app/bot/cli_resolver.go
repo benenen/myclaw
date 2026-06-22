@@ -151,15 +151,19 @@ func (r *BotCLIResolver) buildMCPConfigJSON(ctx context.Context, botID string) s
 		} else {
 			for _, srv := range servers {
 				cfg := map[string]any{"type": srv.ServerType}
-				if srv.ServerType == "http" {
+				switch srv.ServerType {
+				case "http":
 					cfg["url"] = srv.URL
-				} else {
+				case "stdio":
 					args := srv.Args
 					if args == nil {
 						args = []string{}
 					}
 					cfg["command"] = srv.Command
 					cfg["args"] = args
+				default:
+					log.Printf("unknown mcp server type %q for %q, skipping", srv.ServerType, srv.Name)
+					continue
 				}
 				mcpServers[srv.Name] = cfg
 			}

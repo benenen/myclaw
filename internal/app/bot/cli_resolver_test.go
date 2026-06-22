@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -350,19 +351,37 @@ func TestResolveInjectsAttachedEnabledMCPServers(t *testing.T) {
 		OrchestratorPrompt:  "BRAIN-PROMPT",
 	})
 	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
-		"bot_brain": {{ID: "mcp_a", Name: "extra", ServerType: "http", URL: "http://extra", Enabled: true}},
+		"bot_brain": {
+			{ID: "mcp_a", Name: "extra", ServerType: "http", URL: "http://extra", Enabled: true},
+			{ID: "mcp_b", Name: "fs", ServerType: "stdio", Command: "npx", Args: []string{"-y", "srv"}, Enabled: true},
+		},
 	}})
 
 	spec, err := r.Resolve(context.Background(), "bot_brain")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	joined := strings.Join(spec.Args, " ")
-	if !strings.Contains(joined, "\"myclaw\"") || !strings.Contains(joined, "\"extra\"") {
-		t.Fatalf("expected myclaw + extra in mcp config, got: %s", joined)
+
+	idx := slices.Index(spec.Args, "--mcp-config")
+	if idx < 0 || idx+1 >= len(spec.Args) {
+		t.Fatalf("--mcp-config flag missing in %v", spec.Args)
 	}
-	if !strings.Contains(joined, "http://extra") {
-		t.Fatalf("expected extra url in config, got: %s", joined)
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(spec.Args[idx+1]), &cfg); err != nil {
+		t.Fatalf("mcp-config not valid JSON: %v", err)
+	}
+	if _, ok := cfg.MCPServers["myclaw"]; !ok {
+		t.Fatalf("myclaw missing: %v", cfg.MCPServers)
+	}
+	extra, ok := cfg.MCPServers["extra"]
+	if !ok || extra["type"] != "http" || extra["url"] != "http://extra" {
+		t.Fatalf("extra http server wrong: %+v", extra)
+	}
+	fs, ok := cfg.MCPServers["fs"]
+	if !ok || fs["type"] != "stdio" || fs["command"] != "npx" {
+		t.Fatalf("fs stdio server wrong: %+v", fs)
 	}
 }
 
