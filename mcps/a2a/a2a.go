@@ -166,20 +166,34 @@ type SessionDetail struct {
 	Capability string `json:"capability"`
 }
 
+// enrichSession fills a session's cwd + capability from its boo snapshot.
+func enrichSession(s booSession) SessionDetail {
+	d := SessionDetail{Name: s.Name, Title: s.Title, IdleMS: s.IdleMS}
+	if cwd, ok := booSessionCwd(s.Name); ok {
+		d.Cwd = cwd
+		if cap, ok := booCapabilitiesDescription(cwd); ok {
+			d.Capability = cap
+		}
+	}
+	return d
+}
+
+// booRosterDetailed returns every live session enriched with cwd + capability,
+// so a single roster read carries enough for routing decisions.
+func booRosterDetailed(ctx context.Context) []SessionDetail {
+	out := []SessionDetail{}
+	for _, s := range booRoster(ctx) {
+		out = append(out, enrichSession(s))
+	}
+	return out
+}
+
 // booSessionDetail returns one live session's detail (false if not a live session).
 func booSessionDetail(ctx context.Context, name string) (SessionDetail, bool) {
 	for _, s := range booRoster(ctx) {
-		if s.Name != name {
-			continue
+		if s.Name == name {
+			return enrichSession(s), true
 		}
-		d := SessionDetail{Name: s.Name, Title: s.Title, IdleMS: s.IdleMS}
-		if cwd, ok := booSessionCwd(name); ok {
-			d.Cwd = cwd
-			if cap, ok := booCapabilitiesDescription(cwd); ok {
-				d.Capability = cap
-			}
-		}
-		return d, true
 	}
 	return SessionDetail{}, false
 }
