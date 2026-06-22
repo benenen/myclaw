@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strconv"
+	"strings"
 )
 
 // ---- I/O types (jsonschema-tagged for the MCP SDK) ----
@@ -165,7 +169,137 @@ func argsForKill(in KillInput) ([]string, error) {
 	return []string{"kill", in.Name}, nil
 }
 
-// runBoo is the single exec seam; handlers (Task 2) call it, tests stub it.
+// runBoo is the single exec seam; handlers call it, tests stub it.
 var runBoo = func(ctx context.Context, args ...string) (stdout []byte, stderr []byte, exitCode int, err error) {
-	return nil, nil, 0, fmt.Errorf("runBoo not implemented") // replaced in Task 2
+	cmd := exec.CommandContext(ctx, "boo", args...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err = cmd.Run()
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return out.Bytes(), errb.Bytes(), exitErr.ExitCode(), nil
+	}
+	if err != nil {
+		return out.Bytes(), errb.Bytes(), -1, fmt.Errorf("boo not available: %w", err)
+	}
+	return out.Bytes(), errb.Bytes(), 0, nil
+}
+
+// booError maps a non-success boo exit code to a tool error. Returns nil for 0.
+// Exit 4 (wait timeout) is handled by runWait directly and not passed here.
+func booError(name string, exitCode int, stderr []byte) error {
+	switch exitCode {
+	case 0:
+		return nil
+	case 3:
+		return fmt.Errorf("no such session: %s", name)
+	default:
+		msg := strings.TrimSpace(string(stderr))
+		if msg == "" {
+			msg = fmt.Sprintf("boo exited %d", exitCode)
+		}
+		return fmt.Errorf("boo error: %s", msg)
+	}
+}
+
+func runLs(ctx context.Context, in LsInput) (LsOutput, error) {
+	args, err := argsForLs(in)
+	if err != nil {
+		return LsOutput{}, err
+	}
+	out, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return LsOutput{}, err
+	}
+	if e := booError("", code, errb); e != nil {
+		return LsOutput{}, e
+	}
+	sessions := []Session{}
+	if len(bytes.TrimSpace(out)) > 0 {
+		if err := json.Unmarshal(out, &sessions); err != nil {
+			return LsOutput{}, fmt.Errorf("parse ls --json: %w", err)
+		}
+	}
+	return LsOutput{Sessions: sessions}, nil
+}
+
+func runNew(ctx context.Context, in NewInput) (NewOutput, error) {
+	args, err := argsForNew(in)
+	if err != nil {
+		return NewOutput{}, err
+	}
+	out, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return NewOutput{}, err
+	}
+	if e := booError(in.Name, code, errb); e != nil {
+		return NewOutput{}, e
+	}
+	return NewOutput{Name: strings.TrimSpace(string(out))}, nil
+}
+
+func runSend(ctx context.Context, in SendInput) (SendOutput, error) {
+	args, err := argsForSend(in)
+	if err != nil {
+		return SendOutput{}, err
+	}
+	_, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return SendOutput{}, err
+	}
+	if e := booError(in.Name, code, errb); e != nil {
+		return SendOutput{}, e
+	}
+	return SendOutput{Ok: true}, nil
+}
+
+func runPeek(ctx context.Context, in PeekInput) (PeekOutput, error) {
+	args, err := argsForPeek(in)
+	if err != nil {
+		return PeekOutput{}, err
+	}
+	out, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return PeekOutput{}, err
+	}
+	if e := booError(in.Name, code, errb); e != nil {
+		return PeekOutput{}, e
+	}
+	var po PeekOutput
+	if err := json.Unmarshal(out, &po); err != nil {
+		return PeekOutput{}, fmt.Errorf("parse peek --json: %w", err)
+	}
+	return po, nil
+}
+
+func runWait(ctx context.Context, in WaitInput) (WaitOutput, error) {
+	args, err := argsForWait(in)
+	if err != nil {
+		return WaitOutput{}, err
+	}
+	_, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return WaitOutput{}, err
+	}
+	if code == 4 { // timeout: a normal result, not an error
+		return WaitOutput{Matched: false}, nil
+	}
+	if e := booError(in.Name, code, errb); e != nil {
+		return WaitOutput{}, e
+	}
+	return WaitOutput{Matched: true}, nil
+}
+
+func runKill(ctx context.Context, in KillInput) (KillOutput, error) {
+	args, err := argsForKill(in)
+	if err != nil {
+		return KillOutput{}, err
+	}
+	_, errb, code, err := runBoo(ctx, args...)
+	if err != nil {
+		return KillOutput{}, err
+	}
+	if e := booError(in.Name, code, errb); e != nil {
+		return KillOutput{}, e
+	}
+	return KillOutput{Ok: true}, nil
 }
