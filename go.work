@@ -5,4 +5,5 @@ use (
 	./mcps/echo
 	./mcps/ping
 	./mcps/boo
+	./mcps/a2a
 )
