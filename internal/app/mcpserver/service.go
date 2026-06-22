@@ -127,8 +127,12 @@ func (s *Service) DetachFromBot(ctx context.Context, botID, serverName string) e
 }
 
 // SetBotServers replaces the full set of MCP servers for a bot.
+// Returns ErrNotFound if the bot does not exist.
 // Returns ErrInvalidArg if any server ID is not found.
 func (s *Service) SetBotServers(ctx context.Context, botID string, serverIDs []string) error {
+	if err := s.requireBot(ctx, botID); err != nil {
+		return err
+	}
 	for _, id := range serverIDs {
 		if _, err := s.repo.GetByID(ctx, id); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
