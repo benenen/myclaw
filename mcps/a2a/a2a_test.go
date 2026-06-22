@@ -328,3 +328,63 @@ func TestResolveBooFallsBackToTitleWhenNoCapabilities(t *testing.T) {
 		t.Fatalf("fallback: %+v", got)
 	}
 }
+
+func TestBooRosterParsesSessions(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"a build","idle_ms":1200},{"name":"chat","title":"a chat","idle_ms":50}]`), 0, nil
+	})()
+	got := booRoster(context.Background())
+	if len(got) != 2 || got[0].Name != "build" || got[0].Title != "a build" || got[0].IdleMS != 1200 {
+		t.Fatalf("roster: %+v", got)
+	}
+}
+
+func TestBooRosterEmptyOnFailure(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return nil, 1, nil })()
+	if got := booRoster(context.Background()); len(got) != 0 {
+		t.Fatalf("want empty on ls failure, got %+v", got)
+	}
+	defer stubBoo(func(args ...string) ([]byte, int, error) { return []byte(`{bad`), 0, nil })()
+	if got := booRoster(context.Background()); len(got) != 0 {
+		t.Fatalf("want empty on bad json, got %+v", got)
+	}
+}
+
+func TestBooSessionDetailLiveWithCapability(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"a build","idle_ms":7}]`), 0, nil
+	})()
+	tmp := t.TempDir()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	cwd := t.TempDir()
+	os.MkdirAll(filepath.Join(tmp, "boo"), 0o755)
+	os.WriteFile(filepath.Join(tmp, "boo", "build.state"), []byte(cwd+"\n"), 0o600)
+	os.WriteFile(filepath.Join(cwd, "boo.capabilities.json"), []byte(`{"description":"go coder"}`), 0o600)
+
+	d, ok := booSessionDetail(context.Background(), "build")
+	if !ok || d.Name != "build" || d.Title != "a build" || d.IdleMS != 7 || d.Cwd != cwd || d.Capability != "go coder" {
+		t.Fatalf("detail: %+v ok=%v", d, ok)
+	}
+}
+
+func TestBooSessionDetailUnknownIsNotOk(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"a build"}]`), 0, nil
+	})()
+	if _, ok := booSessionDetail(context.Background(), "ghost"); ok {
+		t.Fatal("unknown session must be !ok")
+	}
+}
+
+func TestBooSessionDetailLiveNoCapability(t *testing.T) {
+	defer stubBoo(func(args ...string) ([]byte, int, error) {
+		return []byte(`[{"name":"build","title":"a build"}]`), 0, nil
+	})()
+	t.Setenv("BOO_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty boo dir → no .state
+	d, ok := booSessionDetail(context.Background(), "build")
+	if !ok || d.Capability != "" || d.Cwd != "" {
+		t.Fatalf("detail: %+v ok=%v (want ok, empty cap/cwd)", d, ok)
+	}
+}
