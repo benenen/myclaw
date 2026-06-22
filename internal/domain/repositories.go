@@ -43,3 +43,18 @@ type RegisteredAgentRepository interface {
 	List(ctx context.Context) ([]RegisteredAgent, error)
 	DeleteByID(ctx context.Context, id string) error
 }
+
+type MCPServerRepository interface {
+	Create(ctx context.Context, server MCPServer) (MCPServer, error)
+	GetByID(ctx context.Context, id string) (MCPServer, error)
+	GetByName(ctx context.Context, name string) (MCPServer, error)
+	List(ctx context.Context) ([]MCPServer, error)
+	Update(ctx context.Context, server MCPServer) (MCPServer, error)
+	DeleteByID(ctx context.Context, id string) error
+
+	ListByBot(ctx context.Context, botID string) ([]MCPServer, error)
+	ListEnabledByBot(ctx context.Context, botID string) ([]MCPServer, error)
+	SetBotServers(ctx context.Context, botID string, serverIDs []string) error
+	AttachToBot(ctx context.Context, botID, serverID string) error
+	DetachFromBot(ctx context.Context, botID, serverID string) error
+}
