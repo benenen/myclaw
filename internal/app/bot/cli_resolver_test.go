@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -314,6 +315,73 @@ func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
 	}
 	if spec.WorkDir != "/custom/ws" {
 		t.Fatalf("WorkDir = %q, want /custom/ws", spec.WorkDir)
+	}
+}
+
+type stubMCPServerRepo struct {
+	domain.MCPServerRepository // embed; only ListEnabledByBot is exercised
+	byBot map[string][]domain.MCPServer
+}
+
+func (s stubMCPServerRepo) ListEnabledByBot(_ context.Context, botID string) ([]domain.MCPServer, error) {
+	return s.byBot[botID], nil
+}
+
+func TestResolveInjectsAttachedEnabledMCPServers(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID:                "bot_brain",
+		Name:              "brain-bot",
+		AgentCapabilityID: "cap_claude",
+		AgentMode:         "session",
+		Role:              domain.BotRoleOrchestrator,
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_claude": {
+			ID:             "cap_claude",
+			Command:        "/usr/local/bin/claude",
+			Args:           []string{"--stream-json"},
+			SupportedModes: []string{"session"},
+			Available:      true,
+		},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
+		Timeout:             time.Minute,
+		OrchestratorTimeout: 25 * time.Minute,
+		MCPURL:              "http://127.0.0.1:8080/mcp",
+		OrchestratorPrompt:  "BRAIN-PROMPT",
+	})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_brain": {
+			{ID: "mcp_a", Name: "extra", ServerType: "http", URL: "http://extra", Enabled: true},
+			{ID: "mcp_b", Name: "fs", ServerType: "stdio", Command: "npx", Args: []string{"-y", "srv"}, Enabled: true},
+		},
+	}})
+
+	spec, err := r.Resolve(context.Background(), "bot_brain")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	idx := slices.Index(spec.Args, "--mcp-config")
+	if idx < 0 || idx+1 >= len(spec.Args) {
+		t.Fatalf("--mcp-config flag missing in %v", spec.Args)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(spec.Args[idx+1]), &cfg); err != nil {
+		t.Fatalf("mcp-config not valid JSON: %v", err)
+	}
+	if _, ok := cfg.MCPServers["myclaw"]; !ok {
+		t.Fatalf("myclaw missing: %v", cfg.MCPServers)
+	}
+	extra, ok := cfg.MCPServers["extra"]
+	if !ok || extra["type"] != "http" || extra["url"] != "http://extra" {
+		t.Fatalf("extra http server wrong: %+v", extra)
+	}
+	fs, ok := cfg.MCPServers["fs"]
+	if !ok || fs["type"] != "stdio" || fs["command"] != "npx" {
+		t.Fatalf("fs stdio server wrong: %+v", fs)
 	}
 }
 

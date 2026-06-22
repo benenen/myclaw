@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/benenen/myclaw/internal/app/mcpserver"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/domain"
 	"github.com/benenen/myclaw/internal/security"
@@ -22,6 +23,7 @@ type BotService struct {
 	provider             channel.Provider
 	runtimes             *BotConnectionManager
 	workspaceRoot        string
+	mcp                  *mcpserver.Service
 }
 
 type capabilityDiscoverer interface {
@@ -37,6 +39,7 @@ func NewBotService(
 	cipher *security.Cipher,
 	provider channel.Provider,
 	runtimes *BotConnectionManager,
+	mcp *mcpserver.Service,
 ) *BotService {
 	return &BotService{
 		users:        users,
@@ -47,6 +50,7 @@ func NewBotService(
 		cipher:       cipher,
 		provider:     provider,
 		runtimes:     runtimes,
+		mcp:          mcp,
 	}
 }
 
@@ -150,6 +154,7 @@ type BotListItem struct {
 	AgentCapabilityID string
 	AgentMode         string
 	CLIAlias          string
+	MCPServerIDs      []string
 }
 
 type StartBotLoginOutput struct {
@@ -281,6 +286,10 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 	}
 	items := make([]BotListItem, 0, len(bots))
 	for _, bot := range bots {
+		mcpIDs, err := s.attachedServerIDs(ctx, bot.ID)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, BotListItem{
 			BotID:             bot.ID,
 			Name:              bot.Name,
@@ -292,6 +301,7 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 			AgentCapabilityID: bot.AgentCapabilityID,
 			AgentMode:         bot.AgentMode,
 			CLIAlias:          bot.CLIAlias,
+			MCPServerIDs:      mcpIDs,
 		})
 	}
 	return items, nil
@@ -302,6 +312,7 @@ type ConfigureBotAgentInput struct {
 	AgentCapabilityID string
 	AgentMode         string
 	CLIAlias          string
+	MCPServerIDs      []string
 }
 
 func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAgentInput) (BotListItem, error) {
@@ -319,6 +330,15 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 	if err != nil {
 		return BotListItem{}, err
 	}
+	// The bot row and its MCP attachments are written in separate statements
+	// (no single transaction); a failure here returns an error and the caller retries.
+	if err := s.mcp.SetBotServers(ctx, bot.ID, input.MCPServerIDs); err != nil {
+		return BotListItem{}, err
+	}
+	mcpIDs, err := s.attachedServerIDs(ctx, bot.ID)
+	if err != nil {
+		return BotListItem{}, err
+	}
 	return BotListItem{
 		BotID:             bot.ID,
 		Name:              bot.Name,
@@ -329,7 +349,24 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 		AgentCapabilityID: bot.AgentCapabilityID,
 		AgentMode:         bot.AgentMode,
 		CLIAlias:          bot.CLIAlias,
+		MCPServerIDs:      mcpIDs,
 	}, nil
+}
+
+func (s *BotService) attachedServerIDs(ctx context.Context, botID string) ([]string, error) {
+	servers, err := s.mcp.ListByBot(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(servers))
+	for _, sv := range servers {
+		ids = append(ids, sv.ID)
+	}
+	return ids, nil
+}
+
+func (s *BotService) ListMCPServers(ctx context.Context) ([]domain.MCPServer, error) {
+	return s.mcp.List(ctx)
 }
 
 type AgentCapabilityListItem struct {

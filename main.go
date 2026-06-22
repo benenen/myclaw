@@ -62,6 +62,7 @@ func newRootCommand(stdout, stderr io.Writer, server func(io.Writer) int) (*cobr
 	})
 
 	root.AddCommand(cmd.NewServerCommandWithRunner(stderr, &exitCode, server))
+	root.AddCommand(cmd.NewMCPCommand(stderr))
 
 	return root, &exitCode
 }
@@ -79,4 +80,5 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  myclaw [server]")
 	fmt.Fprintln(w, "  myclaw help")
+	fmt.Fprintln(w, "  myclaw mcp <list|add|remove|enable|disable|attach|detach> [...]")
 }

@@ -102,3 +102,15 @@ type RegisteredAgent struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
+
+type MCPServer struct {
+	ID         string
+	Name       string
+	ServerType string
+	URL        string
+	Command    string
+	Args       []string
+	Enabled    bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}

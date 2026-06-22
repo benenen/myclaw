@@ -1,6 +1,7 @@
 const API = '/api/v1';
 let bots = [];
 let agentCapabilities = [];
+let mcpServers = [];
 let selectedBotId = '';
 let loginPollTimer = null;
 let activeBindingId = '';
@@ -12,6 +13,27 @@ function showLoading(elementId, count = 4) {
   if (!el) return;
   el.innerHTML = Array.from({ length: count }, (_, i) =>
     `<div class="skeleton${i === count - 1 ? ' short' : ''}"></div>`
+  ).join('');
+}
+
+// ── MCP Servers ─────────────────────────────────────────
+
+async function loadMCPServers() {
+  try {
+    const res = await fetch('/api/v1/mcp-servers');
+    const body = await res.json();
+    mcpServers = body.data || [];
+  } catch (e) {
+    mcpServers = [];
+  }
+}
+
+function renderMCPOptions(selectedIds) {
+  const sel = document.getElementById('detail-agent-mcp');
+  if (!sel) return;
+  const chosen = new Set(selectedIds || []);
+  sel.innerHTML = mcpServers.map(s =>
+    `<option value="${escapeHtml(s.id)}"${chosen.has(s.id) ? ' selected' : ''}>${escapeHtml(s.name)}${s.enabled ? '' : ' (disabled)'}</option>`
   ).join('');
 }
 
@@ -59,6 +81,7 @@ function renderSelectedBotAgentControls() {
   const bot = selectedBot();
   renderCapabilityOptions('detail-agent-capability', 'detail-agent-mode', bot?.agent_capability_id || '', bot?.agent_mode || '');
   document.getElementById('detail-agent-alias').value = bot?.cli_alias || '';
+  renderMCPOptions(bot?.mcp_server_ids || []);
 }
 
 async function saveSelectedBotAgent() {
@@ -67,18 +90,21 @@ async function saveSelectedBotAgent() {
   const agentCapabilityID = document.getElementById('detail-agent-capability').value;
   const agentMode = document.getElementById('detail-agent-mode').value;
   const cliAlias = document.getElementById('detail-agent-alias').value.trim();
+  const mcpServerIds = Array.from(document.getElementById('detail-agent-mcp').selectedOptions).map(o => o.value);
   if (!agentCapabilityID || !agentMode) { toast('capability and mode required'); return; }
   const data = await api('POST', '/bots/agent', {
     bot_id: bot.bot_id,
     agent_capability_id: agentCapabilityID,
     agent_mode: agentMode,
     cli_alias: cliAlias,
+    mcp_server_ids: mcpServerIds,
   });
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const updated = data.data;
   bot.agent_capability_id = updated.agent_capability_id;
   bot.agent_mode = updated.agent_mode;
   bot.cli_alias = updated.cli_alias || '';
+  bot.mcp_server_ids = updated.mcp_server_ids || [];
   renderSelectedBotAgentControls();
   renderBotList();
   renderDetail();
@@ -628,4 +654,5 @@ function renderMarkdown(text) {
 
 // ── Bootstrap ───────────────────────────────────────────
 
+loadMCPServers();
 loadAgentCapabilities().then(() => loadBots());

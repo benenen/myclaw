@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/benenen/myclaw/internal/app/mcpserver"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/wechat"
 	"github.com/benenen/myclaw/internal/domain"
@@ -49,6 +50,7 @@ func newTestBotServiceWithRuntimeStarter(t *testing.T, starter channel.RuntimeSt
 	bots := repositories.NewBotRepository(db)
 	accounts := repositories.NewChannelAccountRepository(db)
 	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, provider, cipher, nil)
+	mcpSvc := mcpserver.NewService(repositories.NewMCPServerRepository(db), repositories.NewBotRepository(db))
 
 	return NewBotService(
 		repositories.NewUserRepository(db),
@@ -59,6 +61,7 @@ func newTestBotServiceWithRuntimeStarter(t *testing.T, starter channel.RuntimeSt
 		cipher,
 		provider,
 		runtimes,
+		mcpSvc,
 	), baseProvider
 }
 
@@ -74,6 +77,7 @@ func newTestBotServiceWithProvider(t *testing.T, provider channel.Provider) *Bot
 	accounts := repositories.NewChannelAccountRepository(db)
 	starter, _ := provider.(channel.RuntimeStarter)
 	runtimes := NewBotConnectionManagerWithCipher(bots, accounts, starter, cipher, nil)
+	mcpSvc := mcpserver.NewService(repositories.NewMCPServerRepository(db), repositories.NewBotRepository(db))
 
 	return NewBotService(
 		repositories.NewUserRepository(db),
@@ -84,6 +88,7 @@ func newTestBotServiceWithProvider(t *testing.T, provider channel.Provider) *Bot
 		cipher,
 		provider,
 		runtimes,
+		mcpSvc,
 	)
 }
 

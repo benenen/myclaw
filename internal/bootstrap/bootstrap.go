@@ -15,6 +15,7 @@ import (
 	"github.com/benenen/myclaw/internal/api/http/web"
 	"github.com/benenen/myclaw/internal/app/bot"
 	"github.com/benenen/myclaw/internal/app/capability"
+	"github.com/benenen/myclaw/internal/app/mcpserver"
 	"github.com/benenen/myclaw/internal/app/orchestration"
 	"github.com/benenen/myclaw/internal/channel"
 	"github.com/benenen/myclaw/internal/channel/feishu"
@@ -73,6 +74,8 @@ func New(cfg config.Config) (*App, error) {
 	capabilityRepo := repositories.NewAgentCapabilityRepository(db)
 	registeredAgentRepo := repositories.NewRegisteredAgentRepository(db)
 	botCLISessionRepo := repositories.NewBotCLISessionRepository(db)
+	mcpServerRepo := repositories.NewMCPServerRepository(db)
+	mcpSvc := mcpserver.NewService(mcpServerRepo, botRepo)
 
 	wechatCfg := wechat.LoadConfig()
 	wechatClient := wechat.NewHTTPClient(wechatCfg, logger)
@@ -112,6 +115,7 @@ func New(cfg config.Config) (*App, error) {
 		MCPURL:              cfg.MCPURL,
 		OrchestratorPrompt:  orchestration.OrchestratorPrompt(),
 	})
+	resolver.SetMCPServerRepository(mcpServerRepo)
 	orchestrator := bot.NewBotMessageOrchestrator(executor, multiReplyGateway, resolver, botCLISessionRepo)
 	orchestrator.SetProgressReporter(multiProgressReporter)
 
@@ -124,7 +128,7 @@ func New(cfg config.Config) (*App, error) {
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, multiProvider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
 	})
-	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, multiProvider, botManager)
+	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, multiProvider, botManager, mcpSvc)
 	botSvc.SetWorkspaceRoot(cfg.BotWorkspaceRoot())
 	discoverer := capability.NewAgentCapabilityDiscoverer(capabilityRepo, nil)
 	botSvc.SetCapabilityDiscoverer(discoverer)
