@@ -21,9 +21,12 @@ mcp-echo:
 mcp-ping:
 	go build -o bin/mcp-ping ./mcps/ping
 
-mcps: mcp-echo mcp-ping
+mcp-boo:
+	go build -o bin/mcp-boo ./mcps/boo
+
+mcps: mcp-echo mcp-ping mcp-boo
 
 test-mcps:
-	go test ./mcps/echo/... ./mcps/ping/...
+	go test ./mcps/echo/... ./mcps/ping/... ./mcps/boo/...
 
-.PHONY: test run watch mcp-echo mcp-ping mcps test-mcps
+.PHONY: test run watch mcp-echo mcp-ping mcp-boo mcps test-mcps
