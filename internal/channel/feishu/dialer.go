@@ -19,6 +19,11 @@ func (wsDialer) Dial(creds Credentials, onMessage func(InboundMessage)) (conn, e
 		OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
 			onMessage(normalizeMessage(event))
 			return nil
+		}).
+		OnP2MessageReadV1(func(_ context.Context, _ *larkim.P2MessageReadV1) error {
+			// Read receipts need no handling; register a no-op so the SDK stops
+			// logging "not found handler" for every im.message.message_read_v1 event.
+			return nil
 		})
 	cli := larkws.NewClient(creds.AppID, creds.AppSecret,
 		larkws.WithEventHandler(handler),
