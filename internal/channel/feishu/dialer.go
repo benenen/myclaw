@@ -24,6 +24,11 @@ func (wsDialer) Dial(creds Credentials, onMessage func(InboundMessage)) (conn, e
 			// Read receipts need no handling; register a no-op so the SDK stops
 			// logging "not found handler" for every im.message.message_read_v1 event.
 			return nil
+		}).
+		OnP2ChatAccessEventBotP2pChatEnteredV1(func(_ context.Context, _ *larkim.P2ChatAccessEventBotP2pChatEnteredV1) error {
+			// "user entered the bot's p2p chat" needs no handling; no-op silences the
+			// SDK's "not found handler" error for im.chat.access_event.bot_p2p_chat_entered_v1.
+			return nil
 		})
 	cli := larkws.NewClient(creds.AppID, creds.AppSecret,
 		larkws.WithEventHandler(handler),

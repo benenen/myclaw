@@ -113,9 +113,14 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
-	if env := flattenEnv(spec.Env); len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	// claude refuses to bypass permissions while running as root unless it
+	// believes it is sandboxed. myclaw runs claude as root in a container, so set
+	// IS_SANDBOX=1 (the documented escape) — without it, both the
+	// --dangerously-skip-permissions flag and permissions.defaultMode=bypassPermissions
+	// are rejected with "cannot be used with root/sudo". spec.Env is applied last so
+	// an operator-supplied value can still override.
+	cmd.Env = append(os.Environ(), "IS_SANDBOX=1")
+	cmd.Env = append(cmd.Env, flattenEnv(spec.Env)...)
 
 	stderr := &acpStderrWriter{}
 	cmd.Stderr = stderr
