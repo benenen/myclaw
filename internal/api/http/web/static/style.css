@@ -825,6 +825,10 @@ option { background: var(--panel-3); color: var(--ink); }
 }
 .mcp-option:hover { background: var(--panel-2); }
 .mcp-option input[type="checkbox"] {
+  /* restore native checkbox rendering — the global `input { appearance: none }`
+     strips the checkmark, and accent-color only applies with native appearance. */
+  appearance: auto;
+  -webkit-appearance: auto;
   width: 14px; height: 14px;
   flex: 0 0 auto;
   accent-color: var(--accent);
