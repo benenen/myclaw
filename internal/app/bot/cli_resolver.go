@@ -119,6 +119,10 @@ func (r *BotCLIResolver) Resolve(ctx context.Context, botID string) (agent.Spec,
 			return agent.Spec{}, err
 		}
 	}
+	if len(bot.AgentEnv) > 0 {
+		spec.Env = bot.AgentEnv
+		log.Printf("agent launch env: bot_id=%s %s", botID, formatEnvKV(bot.AgentEnv))
+	}
 	if r.sessions != nil {
 		if stored, err := r.sessions.Get(ctx, botID, capability.Key); err == nil {
 			spec.ResumeSessionID = stored.SessionID
@@ -161,6 +165,20 @@ func writeSystemPromptDoc(workDir, cliKey, prompt string) error {
 		return err
 	}
 	return nil
+}
+
+// formatEnvKV renders env as sorted "KEY=VALUE" pairs (logged at launch).
+func formatEnvKV(env map[string]string) string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+env[k])
+	}
+	return strings.Join(parts, " ")
 }
 
 type mcpEntry struct {

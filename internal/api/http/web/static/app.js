@@ -76,6 +76,35 @@ function closeMCPDropdown(e) {
   }
 }
 
+// ── Agent Env Rows ───────────────────────────────────────
+
+function addEnvRow(k, v) {
+  const rows = document.getElementById('detail-agent-env-rows');
+  const row = document.createElement('div');
+  row.className = 'env-row';
+  row.innerHTML = `
+    <input type="text" class="env-key" placeholder="KEY" value="${escapeHtml(k || '')}">
+    <input type="text" class="env-val" placeholder="VALUE" value="${escapeHtml(v || '')}">
+    <button type="button" class="env-del" title="remove" onclick="this.parentElement.remove()">×</button>`;
+  rows.appendChild(row);
+}
+
+function renderEnvRows(envObj) {
+  const rows = document.getElementById('detail-agent-env-rows');
+  rows.innerHTML = '';
+  Object.entries(envObj || {}).forEach(([k, v]) => addEnvRow(k, v));
+}
+
+function collectEnv() {
+  const out = {};
+  document.querySelectorAll('#detail-agent-env-rows .env-row').forEach(row => {
+    const k = row.querySelector('.env-key').value.trim();
+    if (!k) return;
+    out[k] = row.querySelector('.env-val').value;
+  });
+  return out;
+}
+
 // ── Agent Capabilities ──────────────────────────────────
 
 async function loadAgentCapabilities() {
@@ -121,6 +150,7 @@ function renderSelectedBotAgentControls() {
   renderCapabilityOptions('detail-agent-capability', 'detail-agent-mode', bot?.agent_capability_id || '', bot?.agent_mode || '');
   document.getElementById('detail-agent-alias').value = bot?.cli_alias || '';
   renderMCPOptions(bot?.mcp_server_ids || []);
+  renderEnvRows(bot?.agent_env || {});
 }
 
 async function saveSelectedBotAgent() {
@@ -139,6 +169,7 @@ async function saveSelectedBotAgent() {
     cli_alias: cliAlias,
     mcp_server_ids: mcpServerIds,
     system_prompt: systemPrompt,
+    agent_env: collectEnv(),
   });
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const updated = data.data;
@@ -147,6 +178,7 @@ async function saveSelectedBotAgent() {
   bot.cli_alias = updated.cli_alias || '';
   bot.system_prompt = updated.system_prompt || '';
   bot.mcp_server_ids = updated.mcp_server_ids || [];
+  bot.agent_env = updated.agent_env || {};
   renderSelectedBotAgentControls();
   renderBotList();
   renderDetail();
@@ -536,11 +568,13 @@ async function saveSystemPrompt() {
     cli_alias: cliAlias,
     mcp_server_ids: mcpServerIds,
     system_prompt: systemPrompt,
+    agent_env: collectEnv(),
   });
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   const updated = data.data;
   bot.system_prompt = updated.system_prompt || '';
   bot.mcp_server_ids = updated.mcp_server_ids || [];
+  selectedBot().agent_env = data.data.agent_env || {};
   closeSystemPromptModal();
   toast('system prompt saved');
 }

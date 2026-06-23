@@ -72,6 +72,7 @@ type Bot struct {
 	CLIAlias          string
 	Workspace         string
 	SystemPrompt      string
+	AgentEnv          map[string]string
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time

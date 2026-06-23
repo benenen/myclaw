@@ -63,6 +63,7 @@ type CreateBotInput struct {
 	AgentCapabilityID string
 	AgentMode         string
 	SystemPrompt      string
+	AgentEnv          map[string]string
 }
 
 type CreateBotOutput struct {
@@ -76,6 +77,7 @@ type CreateBotOutput struct {
 	AgentCapabilityID string
 	AgentMode         string
 	SystemPrompt      string
+	AgentEnv          map[string]string
 }
 
 func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (CreateBotOutput, error) {
@@ -111,6 +113,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		AgentMode:         input.AgentMode,
 		Workspace:         workspace,
 		SystemPrompt:      input.SystemPrompt,
+		AgentEnv:          input.AgentEnv,
 	})
 	if err != nil {
 		return CreateBotOutput{}, err
@@ -126,6 +129,7 @@ func (s *BotService) CreateBot(ctx context.Context, input CreateBotInput) (Creat
 		AgentCapabilityID: bot.AgentCapabilityID,
 		AgentMode:         bot.AgentMode,
 		SystemPrompt:      bot.SystemPrompt,
+		AgentEnv:          bot.AgentEnv,
 	}, nil
 }
 
@@ -160,6 +164,7 @@ type BotListItem struct {
 	CLIAlias          string
 	MCPServerIDs      []string
 	SystemPrompt      string
+	AgentEnv          map[string]string
 }
 
 type StartBotLoginOutput struct {
@@ -308,6 +313,7 @@ func (s *BotService) ListBots(ctx context.Context, externalUserID string) ([]Bot
 			CLIAlias:          bot.CLIAlias,
 			MCPServerIDs:      mcpIDs,
 			SystemPrompt:      bot.SystemPrompt,
+			AgentEnv:          bot.AgentEnv,
 		})
 	}
 	return items, nil
@@ -320,6 +326,7 @@ type ConfigureBotAgentInput struct {
 	CLIAlias          string
 	MCPServerIDs      []string
 	SystemPrompt      string
+	AgentEnv          map[string]string
 }
 
 func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAgentInput) (BotListItem, error) {
@@ -334,6 +341,10 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 	bot.AgentMode = input.AgentMode
 	bot.CLIAlias = strings.TrimSpace(input.CLIAlias)
 	bot.SystemPrompt = strings.TrimSpace(input.SystemPrompt)
+	bot.AgentEnv = input.AgentEnv
+	if bot.AgentEnv == nil {
+		bot.AgentEnv = map[string]string{}
+	}
 	bot, err = s.bots.Update(ctx, bot)
 	if err != nil {
 		return BotListItem{}, err
@@ -359,6 +370,7 @@ func (s *BotService) ConfigureBotAgent(ctx context.Context, input ConfigureBotAg
 		CLIAlias:          bot.CLIAlias,
 		MCPServerIDs:      mcpIDs,
 		SystemPrompt:      bot.SystemPrompt,
+		AgentEnv:          bot.AgentEnv,
 	}, nil
 }
 

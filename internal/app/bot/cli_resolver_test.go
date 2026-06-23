@@ -786,6 +786,31 @@ func (erroringSessionRepoStub) Get(context.Context, string, string) (domain.BotC
 	return domain.BotCLISession{}, errors.New("db down")
 }
 
+func TestResolveInjectsAgentEnv(t *testing.T) {
+	bots := newBotRepoStub(domain.Bot{
+		ID: "bot_e", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp",
+		AgentEnv: map[string]string{"FOO": "bar"},
+	})
+	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
+		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
+	}}
+	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{})
+	spec, err := r.Resolve(context.Background(), "bot_e")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if spec.Env["FOO"] != "bar" {
+		t.Fatalf("spec.Env = %+v", spec.Env)
+	}
+}
+
+func TestFormatEnvKVSortedKeyValue(t *testing.T) {
+	got := formatEnvKV(map[string]string{"B": "2", "A": "1"})
+	if got != "A=1 B=2" {
+		t.Fatalf("formatEnvKV = %q", got)
+	}
+}
+
 func TestResolveSessionLookupErrorIsNonFatal(t *testing.T) {
 	bots := newBotRepoStub(domain.Bot{ID: "bot_e", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp"})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{

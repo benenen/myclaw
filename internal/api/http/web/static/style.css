@@ -978,3 +978,15 @@ option { background: var(--panel-3); color: var(--ink); }
   #workspace-detail { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+.env-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.env-row { display: flex; gap: 8px; align-items: center; }
+.env-row .env-key { flex: 0 0 38%; }
+.env-row .env-val { flex: 1 1 auto; }
+.env-row .env-del {
+  flex: 0 0 auto; width: 30px; height: 30px; padding: 0; line-height: 1;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--ink-faint); cursor: pointer;
+}
+.env-row .env-del:hover { border-color: var(--line-bright); color: var(--ink); }
+.env-add { margin-top: 2px; }
