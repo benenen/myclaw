@@ -301,9 +301,13 @@ func TestResolveAliasStillValidatesMode(t *testing.T) {
 }
 
 func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
+	// Use a writable temp path, not a hardcoded "/custom/ws": Resolve does
+	// os.MkdirAll(WorkDir), which fails with permission denied on non-root CI
+	// runners (and read-only-root sandboxes).
+	ws := filepath.Join(t.TempDir(), "custom", "ws")
 	bots := newBotRepoStub(domain.Bot{
 		ID: "bot_w", Name: "b", AgentCapabilityID: "cap_codex", AgentMode: "codex-acp",
-		Workspace: "/custom/ws",
+		Workspace: ws,
 	})
 	capabilities := &agentCapabilityRepoStub{byID: map[string]domain.AgentCapability{
 		"cap_codex": {ID: "cap_codex", Key: "codex", Command: "codex", SupportedModes: []string{"codex-acp"}, Available: true},
@@ -313,8 +317,8 @@ func TestResolveUsesBotWorkspaceWhenSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if spec.WorkDir != "/custom/ws" {
-		t.Fatalf("WorkDir = %q, want /custom/ws", spec.WorkDir)
+	if spec.WorkDir != ws {
+		t.Fatalf("WorkDir = %q, want %q", spec.WorkDir, ws)
 	}
 }
 
