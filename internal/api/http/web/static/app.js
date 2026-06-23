@@ -28,13 +28,52 @@ async function loadMCPServers() {
   }
 }
 
+function selectedMCPServerIds() {
+  const panel = document.getElementById('detail-agent-mcp-panel');
+  if (!panel) return [];
+  return Array.from(panel.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+}
+
 function renderMCPOptions(selectedIds) {
-  const sel = document.getElementById('detail-agent-mcp');
-  if (!sel) return;
+  const panel = document.getElementById('detail-agent-mcp-panel');
+  const toggle = document.getElementById('detail-agent-mcp-toggle');
+  if (!panel || !toggle) return;
   const chosen = new Set(selectedIds || []);
-  sel.innerHTML = mcpServers.map(s =>
-    `<option value="${escapeHtml(s.id)}"${chosen.has(s.id) ? ' selected' : ''}>${escapeHtml(s.name)}${s.enabled ? '' : ' (disabled)'}</option>`
-  ).join('');
+  panel.innerHTML = mcpServers.length
+    ? mcpServers.map(s => `
+        <label class="mcp-option">
+          <input type="checkbox" value="${escapeHtml(s.id)}"${chosen.has(s.id) ? ' checked' : ''} onchange="updateMCPToggleLabel()">
+          <span class="mcp-option-name">${escapeHtml(s.name)}${s.enabled ? '' : ' (disabled)'}</span>
+        </label>`).join('')
+    : '<span class="mcp-empty">No MCP servers configured</span>';
+  updateMCPToggleLabel();
+}
+
+function updateMCPToggleLabel() {
+  const toggle = document.getElementById('detail-agent-mcp-toggle');
+  if (!toggle) return;
+  const ids = selectedMCPServerIds();
+  if (ids.length === 0) {
+    toggle.textContent = 'None selected';
+  } else if (ids.length === 1) {
+    const srv = mcpServers.find(s => s.id === ids[0]);
+    toggle.textContent = srv ? srv.name : '1 selected';
+  } else {
+    toggle.textContent = ids.length + ' selected';
+  }
+}
+
+function toggleMCPDropdown() {
+  const wrap = document.getElementById('detail-agent-mcp-wrap');
+  if (!wrap) return;
+  wrap.classList.toggle('open');
+}
+
+function closeMCPDropdown(e) {
+  const wrap = document.getElementById('detail-agent-mcp-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    wrap.classList.remove('open');
+  }
 }
 
 // ── Agent Capabilities ──────────────────────────────────
@@ -81,7 +120,6 @@ function renderSelectedBotAgentControls() {
   const bot = selectedBot();
   renderCapabilityOptions('detail-agent-capability', 'detail-agent-mode', bot?.agent_capability_id || '', bot?.agent_mode || '');
   document.getElementById('detail-agent-alias').value = bot?.cli_alias || '';
-  document.getElementById('detail-agent-system-prompt').value = bot?.system_prompt || '';
   renderMCPOptions(bot?.mcp_server_ids || []);
 }
 
@@ -91,8 +129,8 @@ async function saveSelectedBotAgent() {
   const agentCapabilityID = document.getElementById('detail-agent-capability').value;
   const agentMode = document.getElementById('detail-agent-mode').value;
   const cliAlias = document.getElementById('detail-agent-alias').value.trim();
-  const systemPrompt = document.getElementById('detail-agent-system-prompt').value;
-  const mcpServerIds = Array.from(document.getElementById('detail-agent-mcp').selectedOptions).map(o => o.value);
+  const mcpServerIds = selectedMCPServerIds();
+  const systemPrompt = bot.system_prompt || '';
   if (!agentCapabilityID || !agentMode) { toast('capability and mode required'); return; }
   const data = await api('POST', '/bots/agent', {
     bot_id: bot.bot_id,
@@ -120,6 +158,8 @@ async function saveSelectedBotAgent() {
 window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('create-bot-capability').addEventListener('change', () => syncModeOptions('create-bot-capability', 'create-bot-mode', ''));
   document.getElementById('detail-agent-capability').addEventListener('change', () => syncModeOptions('detail-agent-capability', 'detail-agent-mode', ''));
+  document.getElementById('sp-editor').addEventListener('input', renderSpPreview);
+  document.addEventListener('click', closeMCPDropdown);
 });
 
 // ── Toast ───────────────────────────────────────────────
@@ -460,6 +500,49 @@ async function deleteBot(botID, botName) {
   if (data.code !== 'OK') { toast(data.message || data.code); return; }
   toast('bot deleted');
   await loadBots();
+}
+
+// ── System Prompt Modal ──────────────────────────────────
+
+function openSystemPromptModal() {
+  const bot = selectedBot();
+  document.getElementById('sp-editor').value = bot?.system_prompt || '';
+  renderSpPreview();
+  document.getElementById('system-prompt-modal').classList.add('active');
+}
+
+function closeSystemPromptModal() {
+  document.getElementById('system-prompt-modal').classList.remove('active');
+}
+
+function renderSpPreview() {
+  const text = document.getElementById('sp-editor').value || '';
+  document.getElementById('sp-preview').innerHTML = marked.parse(text);
+}
+
+async function saveSystemPrompt() {
+  const bot = selectedBot();
+  if (!bot) { toast('select a bot'); return; }
+  const agentCapabilityID = document.getElementById('detail-agent-capability').value;
+  const agentMode = document.getElementById('detail-agent-mode').value;
+  const cliAlias = document.getElementById('detail-agent-alias').value.trim();
+  const mcpServerIds = selectedMCPServerIds();
+  const systemPrompt = document.getElementById('sp-editor').value;
+  if (!agentCapabilityID || !agentMode) { toast('capability and mode required'); return; }
+  const data = await api('POST', '/bots/agent', {
+    bot_id: bot.bot_id,
+    agent_capability_id: agentCapabilityID,
+    agent_mode: agentMode,
+    cli_alias: cliAlias,
+    mcp_server_ids: mcpServerIds,
+    system_prompt: systemPrompt,
+  });
+  if (data.code !== 'OK') { toast(data.message || data.code); return; }
+  const updated = data.data;
+  bot.system_prompt = updated.system_prompt || '';
+  bot.mcp_server_ids = updated.mcp_server_ids || [];
+  closeSystemPromptModal();
+  toast('system prompt saved');
 }
 
 // ── QR Modal ────────────────────────────────────────────
