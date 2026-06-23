@@ -132,12 +132,14 @@
                 <input id="detail-agent-alias" type="text" placeholder="e.g. cx">
               </div>
               <div class="form-field wide">
-                <label for="detail-agent-mcp">MCP servers</label>
-                <select id="detail-agent-mcp" multiple size="4"></select>
+                <label>MCP servers</label>
+                <div class="mcp-multiselect" id="detail-agent-mcp-wrap">
+                  <button type="button" class="mcp-toggle" id="detail-agent-mcp-toggle" onclick="toggleMCPDropdown()">None selected</button>
+                  <div class="mcp-panel" id="detail-agent-mcp-panel"></div>
+                </div>
               </div>
               <div class="form-field wide">
-                <label for="detail-agent-system-prompt">System prompt <span style="opacity:.6">(optional)</span></label>
-                <textarea id="detail-agent-system-prompt" rows="6" placeholder="Written to AGENTS.md (codex/opencode) or CLAUDE.md (claude) in the bot workspace on launch."></textarea>
+                <button class="btn-secondary" type="button" onclick="openSystemPromptModal()">系统提示词 / System Prompt</button>
               </div>
               <div class="form-field action">
                 <button class="btn-secondary" onclick="saveSelectedBotAgent()">Save</button>
@@ -276,6 +278,31 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="system-prompt-modal">
+  <div class="modal sp-modal">
+    <div class="modal-top">
+      <span class="marker-label">// SYSTEM PROMPT</span>
+      <h3 class="modal-heading">系统提示词 / System Prompt</h3>
+      <p class="modal-desc">Written to AGENTS.md (codex/opencode) or CLAUDE.md (claude) in the bot workspace on launch.</p>
+    </div>
+    <div class="sp-panes">
+      <div class="sp-pane">
+        <label class="sp-pane-label">Editor</label>
+        <textarea id="sp-editor" class="sp-editor" placeholder="Enter markdown system prompt…"></textarea>
+      </div>
+      <div class="sp-pane">
+        <label class="sp-pane-label">Preview</label>
+        <div id="sp-preview" class="sp-preview markdown-body"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeSystemPromptModal()">取消 / Cancel</button>
+      <button class="btn-primary" onclick="saveSystemPrompt()">保存 / Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="marked.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
