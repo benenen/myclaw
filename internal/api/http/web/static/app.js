@@ -354,7 +354,7 @@ function renderDetail() {
 
   // Only hook bots expose a webhook; HTTP channel bots show their API endpoint.
   document.getElementById('detail-webhook-card').style.display = isHook ? '' : 'none';
-  document.getElementById('detail-http-channel-card').style.display = isHttpChannel ? '' : 'none';
+  document.getElementById('detail-http-channel-section').style.display = isHttpChannel ? '' : 'none';
   if (isHttpChannel) {
     document.getElementById('detail-http-channel-url').textContent = httpChannelUrl();
   }
