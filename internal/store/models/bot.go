@@ -16,7 +16,8 @@ type Bot struct {
 	Role              string `gorm:"not null;default:''"`
 	CLIAlias          string `gorm:"not null;default:''"`
 	Workspace         string `gorm:"not null;default:''"`
-	SystemPrompt      string `gorm:"not null;default:'';column:system_prompt"`
+	SystemPrompt      string            `gorm:"not null;default:'';column:system_prompt"`
+	AgentEnv          map[string]string `gorm:"serializer:json;column:agent_env;not null;default:'{}'"`
 	LastConnectedAt   *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time

@@ -397,3 +397,36 @@ func TestBotRepositorySystemPromptRoundTrip(t *testing.T) {
 		t.Fatalf("after clear system_prompt = %q", updated.SystemPrompt)
 	}
 }
+
+func TestBotRepositoryAgentEnvRoundTrip(t *testing.T) {
+	db := testutil.OpenTestDB(t)
+	repo := NewBotRepository(db)
+	ctx := context.Background()
+
+	created, err := repo.Create(ctx, domain.Bot{
+		ID: "bot_env", UserID: "usr_1", Name: "envy", ChannelType: "feishu",
+		ConnectionStatus: domain.BotConnectionStatusLoginRequired,
+		AgentEnv:         map[string]string{"A": "1", "B": "two"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.AgentEnv["A"] != "1" || created.AgentEnv["B"] != "two" {
+		t.Fatalf("create agent_env = %+v", created.AgentEnv)
+	}
+	got, err := repo.GetByID(ctx, "bot_env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentEnv["A"] != "1" || got.AgentEnv["B"] != "two" {
+		t.Fatalf("get agent_env = %+v", got.AgentEnv)
+	}
+	got.AgentEnv = map[string]string{}
+	updated, err := repo.Update(ctx, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.AgentEnv) != 0 {
+		t.Fatalf("after clear agent_env = %+v", updated.AgentEnv)
+	}
+}
