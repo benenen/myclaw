@@ -436,7 +436,6 @@ func buildACPArgs(command string, extra []string, realCLI bool, resumeSessionID 
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--dangerously-skip-permissions",
 	}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
