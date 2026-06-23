@@ -807,6 +807,33 @@ func TestBotServiceConfigureBotAgentSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestBotServiceConfigureBotAgentEnv(t *testing.T) {
+	svc := newTestBotService(t)
+	created, err := svc.CreateBot(context.Background(), CreateBotInput{
+		ExternalUserID: "u_env", Name: "envy", ChannelType: "feishu",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.ConfigureBotAgent(context.Background(), ConfigureBotAgentInput{
+		BotID: created.BotID, AgentCapabilityID: "cap_codex", AgentMode: "codex-exec",
+		AgentEnv: map[string]string{"TOKEN": "abc"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AgentEnv["TOKEN"] != "abc" {
+		t.Fatalf("returned agent_env = %+v", updated.AgentEnv)
+	}
+	stored, err := svc.bots.GetByID(context.Background(), created.BotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentEnv["TOKEN"] != "abc" {
+		t.Fatalf("stored agent_env = %+v", stored.AgentEnv)
+	}
+}
+
 func TestBotServiceRefreshLoginMarksBotErrorOnProviderFailure(t *testing.T) {
 	svc := newTestBotService(t)
 	bot, err := svc.CreateBot(context.Background(), CreateBotInput{
