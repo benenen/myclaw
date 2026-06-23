@@ -131,9 +131,7 @@
                 </div>
               </div>
               <div class="form-field wide">
-                <label>环境变量 / Env</label>
-                <div class="env-rows" id="detail-agent-env-rows"></div>
-                <button type="button" class="btn-secondary env-add" onclick="addEnvRow('', '')">+ 添加</button>
+                <button class="btn-secondary" type="button" onclick="openAgentEnvModal()">环境变量 / Env</button>
               </div>
               <div class="form-field wide">
                 <button class="btn-secondary" type="button" onclick="openSystemPromptModal()">系统提示词 / System Prompt</button>
@@ -296,6 +294,22 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeSystemPromptModal()">取消 / Cancel</button>
       <button class="btn-primary" onclick="saveSystemPrompt()">保存 / Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="agent-env-modal">
+  <div class="modal">
+    <div class="modal-top">
+      <span class="marker-label">// AGENT ENV</span>
+      <h3 class="modal-heading">环境变量 / Env</h3>
+      <p class="modal-desc">Injected into the agent process on launch; overlays the inherited environment.</p>
+    </div>
+    <div class="env-rows" id="detail-agent-env-rows"></div>
+    <button type="button" class="btn-secondary env-add" onclick="addEnvRow('', '')">+ 添加</button>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeAgentEnvModal()">取消 / Cancel</button>
+      <button class="btn-primary" onclick="saveAgentEnv()">保存 / Save</button>
     </div>
   </div>
 </div>

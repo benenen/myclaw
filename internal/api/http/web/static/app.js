@@ -579,6 +579,40 @@ async function saveSystemPrompt() {
   toast('system prompt saved');
 }
 
+// ── Agent Env Modal ─────────────────────────────────────
+
+function openAgentEnvModal() {
+  renderEnvRows(selectedBot()?.agent_env || {});
+  document.getElementById('agent-env-modal').classList.add('active');
+}
+
+function closeAgentEnvModal() {
+  document.getElementById('agent-env-modal').classList.remove('active');
+}
+
+async function saveAgentEnv() {
+  const bot = selectedBot();
+  if (!bot) { toast('select a bot'); return; }
+  const agentCapabilityID = document.getElementById('detail-agent-capability').value;
+  const agentMode = document.getElementById('detail-agent-mode').value;
+  const cliAlias = document.getElementById('detail-agent-alias').value.trim();
+  const mcpServerIds = selectedMCPServerIds();
+  if (!agentCapabilityID || !agentMode) { toast('capability and mode required'); return; }
+  const data = await api('POST', '/bots/agent', {
+    bot_id: bot.bot_id,
+    agent_capability_id: agentCapabilityID,
+    agent_mode: agentMode,
+    cli_alias: cliAlias,
+    mcp_server_ids: mcpServerIds,
+    system_prompt: bot.system_prompt || '',
+    agent_env: collectEnv(),
+  });
+  if (data.code !== 'OK') { toast(data.message || data.code); return; }
+  bot.agent_env = data.data.agent_env || {};
+  closeAgentEnvModal();
+  toast('env saved');
+}
+
 // ── QR Modal ────────────────────────────────────────────
 
 function closeQRModal() {
