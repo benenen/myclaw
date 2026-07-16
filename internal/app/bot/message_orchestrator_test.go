@@ -505,6 +505,7 @@ func TestOrchestratorRepliesBusyWhenQueueFull(t *testing.T) {
 	<-started
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m2", From: "u2", Text: "two"})
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m3", From: "u3", Text: "three"})
+	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m4", From: "u4", Text: "four"})
 	select {
 	case <-repliedBusy:
 	case <-time.After(time.Second):
@@ -518,7 +519,7 @@ func TestOrchestratorRepliesBusyWhenQueueFull(t *testing.T) {
 	if !slices.Contains(replies, busyReply) {
 		t.Fatalf("replies = %#v", replies)
 	}
-	if !slices.Contains(targets, "u3") {
+	if !slices.Contains(targets, "u4") {
 		t.Fatalf("targets = %#v", targets)
 	}
 }
@@ -556,7 +557,8 @@ func TestOrchestratorProcessesRetriedMessageIDAfterBusyReject(t *testing.T) {
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u1", Text: "one"})
 	<-started
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "queued", From: "u2", Text: "two"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "retry-me", From: "u3", Text: "three"})
+	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "filler", From: "u3", Text: "three"})
+	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "retry-me", From: "u4", Text: "four"})
 	select {
 	case <-busyReplySent:
 	case <-time.After(time.Second):
@@ -580,7 +582,7 @@ func TestOrchestratorProcessesRetriedMessageIDAfterBusyReject(t *testing.T) {
 
 	processed.Lock()
 	defer processed.Unlock()
-	if !reflect.DeepEqual(processedIDs, []string{"m1", "queued", "retry-me"}) {
+	if !reflect.DeepEqual(processedIDs, []string{"m1", "queued", "filler", "retry-me"}) {
 		t.Fatalf("processedIDs = %#v", processedIDs)
 	}
 }
@@ -708,7 +710,6 @@ func TestOrchestratorCreatesWorkerAndProcessesFirstMessage(t *testing.T) {
 		close(processed)
 		return agent.Response{Text: req.Prompt}, nil
 	}}, gateway, fakeResolver{}, nil)
-	orchestrator.SetWorkerIdleTimeoutForTest(200 * time.Millisecond)
 
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u", Text: "one"})
 	select {
@@ -736,49 +737,6 @@ func TestOrchestratorCreatesWorkerAndProcessesFirstMessage(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("expected first message to finish processing")
-}
-
-func TestOrchestratorReclaimsBotStateAfterQueueDrains(t *testing.T) {
-	done := make(chan struct{})
-	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
-		if req.MessageID == "m2" {
-			close(done)
-		}
-		return agent.Response{Text: req.Prompt}, nil
-	}}
-	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
-	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
-		return agent.Spec{Type: "codex-exec", Command: "codex", QueueSize: 2}, nil
-	}}, nil)
-	orchestrator.SetWorkerIdleTimeoutForTest(50 * time.Millisecond)
-
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u", Text: "one"})
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		orchestrator.mu.Lock()
-		state := orchestrator.bots["bot-1"]
-		ready := state != nil && state.worker != nil && cap(state.worker.queue) >= 2
-		orchestrator.mu.Unlock()
-		if ready {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m2", From: "u", Text: "two"})
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for drained queue")
-	}
-
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if !orchestrator.HasBotState("bot-1") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	t.Fatalf("expected bot state reclamation, active=%d", orchestrator.ActiveCount("bot-1"))
 }
 
 func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
@@ -809,6 +767,7 @@ func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 	<-started
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m2", From: "u2", Text: "two"})
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m3", From: "u3", Text: "three"})
+	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m4", From: "u4", Text: "four"})
 	select {
 	case <-busyReplySent:
 	case <-time.After(time.Second):
@@ -816,7 +775,7 @@ func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 	}
 
 	orchestrator.mu.Lock()
-	_, seen := orchestrator.seen["bot-1:m3"]
+	_, seen := orchestrator.seen["bot-1:m4"]
 	orchestrator.mu.Unlock()
 	if seen {
 		t.Fatal("expected busy-rejected message to remain unseen")
@@ -1078,146 +1037,6 @@ func TestOrchestratorRetriesSameMessageIDAfterTimeout(t *testing.T) {
 	if attemptByID["retry-me-2"] != 1 {
 		t.Fatalf("attempts for retry message = %d", attemptByID["retry-me-2"])
 	}
-}
-
-func TestOrchestratorReclaimsAfterStuckSendTimeout(t *testing.T) {
-	started := make(chan struct{})
-	repliesDone := make(chan struct{})
-	var once sync.Once
-	var startedOnce sync.Once
-	mgr := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
-		if req.MessageID == "stuck" {
-			startedOnce.Do(func() { close(started) })
-			<-ctx.Done()
-			return agent.Response{}, ctx.Err()
-		}
-		return agent.Response{Text: req.Prompt}, nil
-	}}
-	gateway := fakeReplyGateway{reply: func(_ context.Context, _ channel.ReplyTarget, resp agent.Response) error {
-		if resp.Text == timeoutReply {
-			once.Do(func() { close(repliesDone) })
-		}
-		return nil
-	}}
-	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{}, nil)
-	orchestrator.SetProcessingTimeoutForTest(50 * time.Millisecond)
-	orchestrator.SetWorkerIdleTimeoutForTest(50 * time.Millisecond)
-
-	msg := InboundMessage{BotID: "bot-1", MessageID: "stuck", From: "u", Text: "one"}
-	go orchestrator.HandleMessage(context.Background(), msg)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for stuck send to start")
-	}
-	select {
-	case <-repliesDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for timeout reply")
-	}
-
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if !orchestrator.HasBotState("bot-1") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if orchestrator.HasBotState("bot-1") {
-		t.Fatalf("expected bot state reclamation, active=%d", orchestrator.ActiveCount("bot-1"))
-	}
-	if got := orchestrator.ActiveCount("bot-1"); got != 0 {
-		t.Fatalf("expected active count reset after reclamation, got %d", got)
-	}
-
-	processed := make(chan string, 1)
-	mgr.send = func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
-		processed <- req.MessageID
-		return agent.Response{Text: req.Prompt}, nil
-	}
-	retryMsg := InboundMessage{BotID: "bot-1", MessageID: "stuck-retry", From: "u", Text: "one"}
-	go orchestrator.HandleMessage(context.Background(), retryMsg)
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case got := <-processed:
-			if got != "stuck-retry" {
-				t.Fatalf("processed = %q", got)
-			}
-			return
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-	t.Fatal("timed out waiting for retried message after stuck send")
-}
-
-func TestOrchestratorReclaimsAfterStuckReplyTimeout(t *testing.T) {
-	sendProcessed := make(chan struct{})
-	replyStarted := make(chan struct{})
-	var sendOnce sync.Once
-	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
-		sendOnce.Do(func() { close(sendProcessed) })
-		return agent.Response{Text: "ok"}, nil
-	}}
-	var stuckOnce sync.Once
-	gateway := fakeReplyGateway{reply: func(ctx context.Context, _ channel.ReplyTarget, resp agent.Response) error {
-		if resp.Text == "ok" {
-			stuckOnce.Do(func() { close(replyStarted) })
-			<-ctx.Done()
-		}
-		return nil
-	}}
-	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{}, nil)
-	orchestrator.SetProcessingTimeoutForTest(50 * time.Millisecond)
-	orchestrator.SetReplyTimeoutForTest(50 * time.Millisecond)
-	orchestrator.SetWorkerIdleTimeoutForTest(50 * time.Millisecond)
-
-	msg := InboundMessage{BotID: "bot-1", MessageID: "stuck-reply", From: "u", Text: "one"}
-	go orchestrator.HandleMessage(context.Background(), msg)
-	select {
-	case <-sendProcessed:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for send before stuck reply")
-	}
-	select {
-	case <-replyStarted:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for stuck reply to start")
-	}
-
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if !orchestrator.HasBotState("bot-1") {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if orchestrator.HasBotState("bot-1") {
-		t.Fatalf("expected bot state reclamation, active=%d", orchestrator.ActiveCount("bot-1"))
-	}
-	if got := orchestrator.ActiveCount("bot-1"); got != 0 {
-		t.Fatalf("expected active count reset after reclamation, got %d", got)
-	}
-
-	processed := make(chan string, 1)
-	mgr.send = func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
-		processed <- req.MessageID
-		return agent.Response{Text: req.Prompt}, nil
-	}
-	retryMsg := InboundMessage{BotID: "bot-1", MessageID: "stuck-reply-retry", From: "u", Text: "one"}
-	go orchestrator.HandleMessage(context.Background(), retryMsg)
-	deadline = time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case got := <-processed:
-			if got != "stuck-reply-retry" {
-				t.Fatalf("processed = %q", got)
-			}
-			return
-		case <-time.After(20 * time.Millisecond):
-		}
-	}
-	t.Fatal("timed out waiting for retried message after stuck reply")
 }
 
 func TestOrchestratorRepliesSuccessfulSendNearDeadline(t *testing.T) {

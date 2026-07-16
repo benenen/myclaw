@@ -14,17 +14,15 @@ import (
 )
 
 const (
-	busyReply              = "当前请求较多，请稍后再试。"
-	timeoutReply           = "处理超时，请稍后重试。"
-	failedReply            = "处理失败，请稍后重试。"
-	ackReply               = "收到，正在处理…"
-	seenMessageTTL         = 10 * time.Minute
-	cleanupInterval        = time.Minute
-	workerIdleTimeout      = seenMessageTTL
-	processingTimeout      = 30 * time.Second
-	replyTimeout           = 5 * time.Second
-	finishWaitPollInterval = 10 * time.Millisecond
-	defaultQueueSize       = 1
+	busyReply         = "当前请求较多，请稍后再试。"
+	timeoutReply      = "处理超时，请稍后重试。"
+	failedReply       = "处理失败，请稍后重试。"
+	ackReply          = "收到，正在处理…"
+	seenMessageTTL    = 10 * time.Minute
+	cleanupInterval   = time.Minute
+	processingTimeout = 30 * time.Second
+	replyTimeout      = 5 * time.Second
+	defaultQueueSize  = 1
 )
 
 type InboundMessage struct {
@@ -58,9 +56,17 @@ type botWorker struct {
 	queue chan InboundMessage
 }
 
+type deliveryItem struct {
+	msg  InboundMessage
+	spec agent.Spec
+	sess channel.ProgressSession
+}
+
 type botState struct {
 	worker    *botWorker
 	pending   *InboundMessage
+	handoff   chan deliveryItem // accept -> deliver, unbuffered
+	stopCh    chan struct{}     // closed by StopBot to stop both goroutines
 	active    int
 	queueSize int
 }
@@ -81,7 +87,6 @@ type BotMessageOrchestrator struct {
 	sessions          domain.BotCLISessionRepository
 	progress          progressReporter
 	messageContext    func(context.Context) context.Context
-	workerIdleTime    time.Duration
 	processingTimeout time.Duration
 	replyTimeout      time.Duration
 }
@@ -94,7 +99,6 @@ func NewBotMessageOrchestrator(executor executor, replies replyGateway, resolver
 		replies:           replies,
 		resolver:          resolver,
 		sessions:          sessions,
-		workerIdleTime:    workerIdleTimeout,
 		processingTimeout: processingTimeout,
 		replyTimeout:      replyTimeout,
 		messageContext: func(ctx context.Context) context.Context {
@@ -192,9 +196,12 @@ func (o *BotMessageOrchestrator) ensureWorker(botID string, state *botState) {
 	state.pending = nil
 	worker := &botWorker{queue: make(chan InboundMessage, defaultQueueSize)}
 	state.worker = worker
+	state.handoff = make(chan deliveryItem)
+	state.stopCh = make(chan struct{})
 	o.mu.Unlock()
 
-	go o.runWorker(botID, worker)
+	go o.runAccept(botID, worker, state)
+	go o.runDeliver(botID, state)
 	if pending != nil {
 		worker.queue <- *pending
 	}
@@ -232,216 +239,169 @@ func (o *BotMessageOrchestrator) queueMessage(botID string, msg InboundMessage) 
 	}
 }
 
-func (o *BotMessageOrchestrator) queueCapacity(botID string) int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	state, ok := o.bots[botID]
-	if !ok || state.worker == nil {
-		return defaultQueueSize
-	}
-	return cap(state.worker.queue)
-}
-
-func (o *BotMessageOrchestrator) waitForQueueCapacity(botID string, min int) {
-	deadline := time.Now().Add(o.currentProcessingTimeout())
-	if min <= 0 {
-		min = defaultQueueSize
-	}
-	for {
-		if o.queueCapacity(botID) >= min {
-			return
-		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return
-		}
-		time.Sleep(finishWaitPollInterval)
-	}
-}
-
-func (o *BotMessageOrchestrator) runWorker(botID string, worker *botWorker) {
-	o.mu.Lock()
-	idleFor := o.workerIdleTime
-	o.mu.Unlock()
-	idleTimer := time.NewTimer(idleFor)
-	defer idleTimer.Stop()
-
+// runAccept drains admitted messages, resolves + acks each, and hands it to the
+// deliver goroutine. It never blocks on Send. It exits when StopBot closes stopCh.
+func (o *BotMessageOrchestrator) runAccept(botID string, worker *botWorker, state *botState) {
 	for {
 		select {
+		case <-state.stopCh:
+			return
 		case msg := <-worker.queue:
-			if !idleTimer.Stop() {
-				select {
-				case <-idleTimer.C:
-				default:
-				}
+			item, ok := o.accept(botID, msg)
+			if !ok {
+				continue
 			}
-			o.processMessage(botID, msg)
-			if !idleTimer.Stop() {
-				select {
-				case <-idleTimer.C:
-				default:
-				}
-			}
-			idleTimer.Reset(idleFor)
-		case <-idleTimer.C:
-			if o.reclaimWorker(botID, worker) {
+			select {
+			case state.handoff <- item:
+			case <-state.stopCh:
+				o.finishMessage(item.msg, false)
 				return
 			}
-			idleTimer.Reset(idleFor)
 		}
 	}
 }
 
-func (o *BotMessageOrchestrator) processMessage(botID string, msg InboundMessage) {
+// accept resolves the spec, acks orchestrator bots, marks the message started,
+// and returns the item to hand to the deliver goroutine. On resolver failure it
+// replies + finishes and returns ok=false.
+func (o *BotMessageOrchestrator) accept(botID string, msg InboundMessage) (deliveryItem, bool) {
 	o.markMessageStarted(msg)
 	resolveCtx, cancelResolve := o.processingContext(msg.Ctx, 0)
-
 	spec, err := o.resolver.Resolve(resolveCtx, botID)
 	cancelResolve()
 	if err != nil {
 		log.Printf("resolver failed: bot_id=%s message_id=%s error=%v", msg.BotID, msg.MessageID, err)
 		o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: failedReply})
-		o.finishMessageEventually(msg, false)
-		return
+		o.finishMessage(msg, false)
+		return deliveryItem{}, false
 	}
 	queueSize := spec.QueueSize
 	if queueSize <= 0 {
 		queueSize = defaultQueueSize
 	}
 	o.resizeWorkerQueue(botID, queueSize)
-	o.waitForQueueCapacity(botID, queueSize)
 
-	if spec.Orchestrator {
-		o.runOrchestratorTurn(botID, msg, spec)
-		return
-	}
-
-	ctx, cancel := o.processingContext(msg.Ctx, spec.Timeout)
-	defer cancel()
-
-	sess := o.beginProgress(ctx, msg.ReplyTarget)
-
-	type sendResult struct {
-		resp agent.Response
-		err  error
-	}
-
-	sendDone := make(chan sendResult, 1)
-	go func() {
-		req := agent.Request{
-			BotID:     msg.BotID,
-			UserID:    msg.From,
-			MessageID: msg.MessageID,
-			Prompt:    msg.Text,
-		}
-		if sess != nil {
-			req.OnProgress = func(ev agent.ProgressEvent) { sess.Step(ctx, ev) }
-		}
-		resp, err := o.executor.Send(ctx, msg.BotID, spec, req)
-		sendDone <- sendResult{resp: resp, err: err}
-	}()
-
-	var result sendResult
-	select {
-	case result = <-sendDone:
-	case <-ctx.Done():
-		log.Printf("processing timeout: bot_id=%s message_id=%s", msg.BotID, msg.MessageID)
-		result.err = ctx.Err()
-	}
-
-	if result.err != nil {
-		log.Printf("agent send failed: bot_id=%s message_id=%s error=%v", msg.BotID, msg.MessageID, result.err)
-		replyText := failedReply
-		if errors.Is(result.err, context.DeadlineExceeded) || errors.Is(result.err, context.Canceled) {
-			replyText = timeoutReply
-		} else if result.resp.RuntimeType != "" && strings.TrimSpace(result.resp.Text) != "" {
-			replyText = result.resp.RuntimeType + ": " + strings.TrimSpace(result.resp.Text)
-		}
-		if sess != nil {
-			sess.Fail(ctx, replyText)
-		}
-		o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
-		o.finishMessageEventually(msg, false)
-		return
-	}
-
-	if o.sessions != nil && strings.TrimSpace(result.resp.SessionID) != "" && result.resp.SessionID != spec.ResumeSessionID {
-		if err := o.sessions.Upsert(context.WithoutCancel(ctx), domain.BotCLISession{
-			BotID:     msg.BotID,
-			CLIType:   result.resp.RuntimeType,
-			SessionID: result.resp.SessionID,
-			WorkDir:   spec.WorkDir,
-		}); err != nil {
-			log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, result.resp.RuntimeType, err)
-		}
-	}
-	if sess != nil {
-		sess.Done(ctx)
-	}
-	o.replyWithTimeout(ctx, msg, result.resp)
-	o.finishMessageEventually(msg, true)
-}
-
-// runOrchestratorTurn acks (via the trace card when tracing is on, else text)
-// and runs the brain turn detached; the final answer is pushed over the saved
-// target after the trace card finalizes.
-func (o *BotMessageOrchestrator) runOrchestratorTurn(botID string, msg InboundMessage, spec agent.Spec) {
 	base := context.WithoutCancel(msg.Ctx)
 	sess := o.beginProgress(base, msg.ReplyTarget)
-	if sess != nil {
-		if err := sess.Ack(base); err != nil {
-			sess = nil
+	if spec.Orchestrator {
+		if sess != nil {
+			if err := sess.Ack(base); err != nil {
+				sess = nil
+				o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
+			}
+		} else {
 			o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
 		}
-	} else {
-		o.replyWithTimeout(msg.Ctx, msg, agent.Response{Text: ackReply})
+	}
+	return deliveryItem{msg: msg, spec: spec, sess: sess}, true
+}
+
+// runDeliver serially runs each turn and pushes its result to the channel.
+// It is the long-lived resp goroutine; it exits only when StopBot closes stopCh.
+func (o *BotMessageOrchestrator) runDeliver(botID string, state *botState) {
+	for {
+		select {
+		case <-state.stopCh:
+			return
+		case item := <-state.handoff:
+			o.executeAndDeliver(botID, state, item)
+		}
+	}
+}
+
+// executeAndDeliver runs one turn via the blocking executor.Send and delivers
+// the outcome: reply + progress finalize + session persist + dedup finish.
+func (o *BotMessageOrchestrator) executeAndDeliver(botID string, state *botState, item deliveryItem) {
+	ctx, cancel := o.deliverContext(state, item.msg, item.spec.Timeout)
+	defer cancel()
+
+	req := agent.Request{
+		BotID:     item.msg.BotID,
+		UserID:    item.msg.From,
+		MessageID: item.msg.MessageID,
+		Prompt:    item.msg.Text,
+	}
+	if item.sess != nil {
+		req.OnProgress = func(ev agent.ProgressEvent) { item.sess.Step(ctx, ev) }
 	}
 
-	timeout := spec.Timeout
-	go func() {
-		ctx := base
-		var cancel context.CancelFunc
-		if timeout > 0 {
-			ctx, cancel = context.WithTimeout(base, timeout)
-			defer cancel()
-		}
-		req := agent.Request{
-			BotID:     msg.BotID,
-			UserID:    msg.From,
-			MessageID: msg.MessageID,
-			Prompt:    msg.Text,
-		}
-		if sess != nil {
-			req.OnProgress = func(ev agent.ProgressEvent) { sess.Step(ctx, ev) }
-		}
-		resp, err := o.executor.Send(ctx, msg.BotID, spec, req)
-		if err != nil {
-			replyText := failedReply
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				replyText = timeoutReply
-			}
-			if sess != nil {
-				sess.Fail(ctx, replyText)
-			}
-			o.replyWithTimeout(ctx, msg, agent.Response{Text: replyText})
-			o.finishMessageEventually(msg, false)
+	resp, err := o.executor.Send(ctx, item.msg.BotID, item.spec, req)
+	if err != nil {
+		if o.isStopping(state) {
+			o.finishMessage(item.msg, false)
 			return
 		}
-		if o.sessions != nil && strings.TrimSpace(resp.SessionID) != "" && resp.SessionID != spec.ResumeSessionID {
-			if err := o.sessions.Upsert(context.WithoutCancel(ctx), domain.BotCLISession{
-				BotID:     msg.BotID,
-				CLIType:   resp.RuntimeType,
-				SessionID: resp.SessionID,
-				WorkDir:   spec.WorkDir,
-			}); err != nil {
-				log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", msg.BotID, resp.RuntimeType, err)
-			}
+		log.Printf("agent send failed: bot_id=%s message_id=%s error=%v", item.msg.BotID, item.msg.MessageID, err)
+		replyText := failedReply
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			replyText = timeoutReply
+		} else if resp.RuntimeType != "" && strings.TrimSpace(resp.Text) != "" {
+			replyText = resp.RuntimeType + ": " + strings.TrimSpace(resp.Text)
 		}
-		if sess != nil {
-			sess.Done(ctx)
+		if item.sess != nil {
+			item.sess.Fail(ctx, replyText)
 		}
-		o.replyWithTimeout(ctx, msg, resp)
-		o.finishMessageEventually(msg, true)
+		o.replyWithTimeout(ctx, item.msg, agent.Response{Text: replyText})
+		o.finishMessage(item.msg, false)
+		return
+	}
+
+	if o.sessions != nil && strings.TrimSpace(resp.SessionID) != "" && resp.SessionID != item.spec.ResumeSessionID {
+		if err := o.sessions.Upsert(context.WithoutCancel(ctx), domain.BotCLISession{
+			BotID:     item.msg.BotID,
+			CLIType:   resp.RuntimeType,
+			SessionID: resp.SessionID,
+			WorkDir:   item.spec.WorkDir,
+		}); err != nil {
+			log.Printf("cli session upsert failed: bot_id=%s cli=%s error=%v", item.msg.BotID, resp.RuntimeType, err)
+		}
+	}
+	if item.sess != nil {
+		item.sess.Done(ctx)
+	}
+	o.replyWithTimeout(ctx, item.msg, resp)
+	o.finishMessage(item.msg, true)
+}
+
+// deliverContext builds the detached per-turn context: request values preserved,
+// inbound cancellation dropped, a per-turn timeout applied, and StopBot able to
+// interrupt the in-flight Send.
+func (o *BotMessageOrchestrator) deliverContext(state *botState, msg InboundMessage, specTimeout time.Duration) (context.Context, context.CancelFunc) {
+	o.mu.Lock()
+	timeout := o.processingTimeout
+	o.mu.Unlock()
+	if specTimeout > timeout {
+		timeout = specTimeout
+	}
+	base := context.Background()
+	if msg.Ctx != nil {
+		base = context.WithoutCancel(msg.Ctx)
+	}
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(base, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(base)
+	}
+	// Link StopBot: closing stopCh cancels the in-flight turn.
+	go func() {
+		select {
+		case <-state.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
+	return ctx, cancel
+}
+
+func (o *BotMessageOrchestrator) isStopping(state *botState) bool {
+	select {
+	case <-state.stopCh:
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *BotMessageOrchestrator) processingContext(parent context.Context, minTimeout time.Duration) (context.Context, context.CancelFunc) {
@@ -493,16 +453,6 @@ func (o *BotMessageOrchestrator) replyContext(parent context.Context) (context.C
 		return context.WithCancel(base)
 	}
 	return context.WithTimeout(base, timeout)
-}
-
-func (o *BotMessageOrchestrator) finishMessageEventually(msg InboundMessage, succeeded bool) {
-	o.finishMessage(msg, succeeded)
-}
-
-func (o *BotMessageOrchestrator) currentProcessingTimeout() time.Duration {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.processingTimeout
 }
 
 func (o *BotMessageOrchestrator) isMessageInProgress(msg InboundMessage) bool {
@@ -621,27 +571,30 @@ func (o *BotMessageOrchestrator) finishMessage(msg InboundMessage, succeeded boo
 	return true
 }
 
-func (o *BotMessageOrchestrator) reclaimWorker(botID string, worker *botWorker) bool {
+// StopBot stops the bot's accept/deliver goroutines and clears its state. Bound
+// to the bot's operational life: called when the bot disconnects/stops. Safe to
+// call for an unknown bot (no-op). The in-flight Send (if any) is cancelled.
+func (o *BotMessageOrchestrator) StopBot(botID string) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	state, ok := o.bots[botID]
-	if !ok || state.worker != worker {
-		return true
-	}
-	if state.active > 0 || state.pending != nil || len(worker.queue) > 0 {
-		return false
-	}
-	delete(o.bots, botID)
-	return true
-}
-
-func (o *BotMessageOrchestrator) SetWorkerIdleTimeoutForTest(d time.Duration) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if d <= 0 {
+	if !ok {
+		o.mu.Unlock()
 		return
 	}
-	o.workerIdleTime = d
+	if state.stopCh != nil {
+		select {
+		case <-state.stopCh:
+		default:
+			close(state.stopCh)
+		}
+	}
+	delete(o.bots, botID)
+	for key := range o.seen {
+		if strings.HasPrefix(key, botID+":") {
+			delete(o.seen, key)
+		}
+	}
+	o.mu.Unlock()
 }
 
 func (o *BotMessageOrchestrator) SetProcessingTimeoutForTest(d time.Duration) {
