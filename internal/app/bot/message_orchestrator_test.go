@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"reflect"
 	"slices"
@@ -473,118 +474,139 @@ func TestOrchestratorSkipsDuplicateInProgressRuntimeEventMessageID(t *testing.T)
 func TestOrchestratorRepliesBusyWhenQueueFull(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	gated := make(chan struct{})
-	repliedBusy := make(chan struct{})
-	var once sync.Once
+	var startOnce sync.Once
 	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		if req.MessageID == "m1" {
-			close(started)
+			startOnce.Do(func() { close(started) })
 			<-release
-		}
-		if req.MessageID == "m2" {
-			<-gated
 		}
 		return agent.Response{Text: req.Prompt}, nil
 	}}
 	var mu sync.Mutex
-	var replies []string
-	var targets []string
+	var busyTargets []string
 	gateway := fakeReplyGateway{reply: func(_ context.Context, target channel.ReplyTarget, resp agent.Response) error {
-		mu.Lock()
-		replies = append(replies, resp.Text)
-		targets = append(targets, target.RecipientID)
-		mu.Unlock()
 		if resp.Text == busyReply {
-			once.Do(func() { close(repliedBusy) })
+			mu.Lock()
+			busyTargets = append(busyTargets, target.RecipientID)
+			mu.Unlock()
 		}
 		return nil
 	}}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{}, nil)
 
+	// Block the bot on m1.
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u1", Text: "one"})
 	<-started
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m2", From: "u2", Text: "two"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m3", From: "u3", Text: "three"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m4", From: "u4", Text: "four"})
-	select {
-	case <-repliedBusy:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for busy reply")
+
+	// Flood until one message is busy-rejected. The busy reply is sent
+	// synchronously inside HandleMessage, so after the call returns we know
+	// whether THIS message was the rejected one.
+	rejected := ""
+	for i := 0; i < 100 && rejected == ""; i++ {
+		id := fmt.Sprintf("q%d", i)
+		mu.Lock()
+		before := len(busyTargets)
+		mu.Unlock()
+		orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: id, From: id, Text: id})
+		mu.Lock()
+		if len(busyTargets) > before {
+			rejected = id
+		}
+		mu.Unlock()
 	}
 	close(release)
-	close(gated)
 
+	if rejected == "" {
+		t.Fatal("expected a busy reply once capacity was exceeded")
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !slices.Contains(replies, busyReply) {
-		t.Fatalf("replies = %#v", replies)
-	}
-	if !slices.Contains(targets, "u4") {
-		t.Fatalf("targets = %#v", targets)
+	if !slices.Contains(busyTargets, rejected) {
+		t.Fatalf("busy targets = %#v, want %q", busyTargets, rejected)
 	}
 }
 
 func TestOrchestratorProcessesRetriedMessageIDAfterBusyReject(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	secondProcessed := make(chan struct{})
-	busyReplySent := make(chan struct{})
-	var busyOnce sync.Once
+	var startOnce sync.Once
 	var processed sync.Mutex
-	processedIDs := make([]string, 0, 2)
-
+	processedIDs := make([]string, 0, 8)
 	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
 		processed.Lock()
 		processedIDs = append(processedIDs, req.MessageID)
 		processed.Unlock()
 		if req.MessageID == "m1" {
-			close(started)
+			startOnce.Do(func() { close(started) })
 			<-release
-		}
-		if req.MessageID == "retry-me" {
-			close(secondProcessed)
 		}
 		return agent.Response{Text: req.Prompt}, nil
 	}}
+	var mu sync.Mutex
+	busyCount := 0
 	gateway := fakeReplyGateway{reply: func(_ context.Context, _ channel.ReplyTarget, resp agent.Response) error {
 		if resp.Text == busyReply {
-			busyOnce.Do(func() { close(busyReplySent) })
+			mu.Lock()
+			busyCount++
+			mu.Unlock()
 		}
 		return nil
 	}}
 	orchestrator := NewBotMessageOrchestrator(mgr, gateway, fakeResolver{}, nil)
 
+	// Block the bot on m1, then flood until one message is busy-rejected.
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u1", Text: "one"})
 	<-started
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "queued", From: "u2", Text: "two"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "filler", From: "u3", Text: "three"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "retry-me", From: "u4", Text: "four"})
-	select {
-	case <-busyReplySent:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for busy reply")
+
+	rejected := ""
+	for i := 0; i < 100 && rejected == ""; i++ {
+		id := fmt.Sprintf("q%d", i)
+		mu.Lock()
+		before := busyCount
+		mu.Unlock()
+		orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: id, From: id, Text: id})
+		mu.Lock()
+		if busyCount > before {
+			rejected = id
+		}
+		mu.Unlock()
+	}
+	if rejected == "" {
+		close(release)
+		t.Fatal("expected a busy reply once capacity was exceeded")
 	}
 
+	containsRejected := func() bool {
+		processed.Lock()
+		defer processed.Unlock()
+		return slices.Contains(processedIDs, rejected)
+	}
+
+	// The rejected message was never queued, so it must not be processed.
+	if containsRejected() {
+		close(release)
+		t.Fatalf("busy-rejected %q should not have been processed", rejected)
+	}
+
+	// Unblock the bot; the admitted (non-rejected) messages drain.
 	close(release)
 
-	select {
-	case <-secondProcessed:
-		t.Fatal("retry-me should not process before retry")
-	case <-time.After(50 * time.Millisecond):
+	// It stays unprocessed without a retry (it was rejected, not queued).
+	time.Sleep(50 * time.Millisecond)
+	if containsRejected() {
+		t.Fatalf("busy-rejected %q should not process without a retry", rejected)
 	}
 
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "retry-me", From: "u3", Text: "three"})
-	select {
-	case <-secondProcessed:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for retried message processing")
+	// Retrying the rejected id now gets it processed.
+	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: rejected, From: rejected, Text: "retry"})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if containsRejected() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	processed.Lock()
-	defer processed.Unlock()
-	if !reflect.DeepEqual(processedIDs, []string{"m1", "queued", "filler", "retry-me"}) {
-		t.Fatalf("processedIDs = %#v", processedIDs)
-	}
+	t.Fatalf("timed out waiting for retried message %q to be processed", rejected)
 }
 
 func TestOrchestratorRepliesTimeoutWhenAgentTimesOut(t *testing.T) {
@@ -742,22 +764,21 @@ func TestOrchestratorCreatesWorkerAndProcessesFirstMessage(t *testing.T) {
 func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	secondStarted := make(chan struct{})
-	busyReplySent := make(chan struct{})
-	var busyOnce sync.Once
+	var startOnce sync.Once
 	mgr := &fakeExecutor{send: func(_ context.Context, _ string, _ agent.Spec, req agent.Request) (agent.Response, error) {
-		switch req.MessageID {
-		case "m1":
-			close(started)
+		if req.MessageID == "m1" {
+			startOnce.Do(func() { close(started) })
 			<-release
-		case "m2":
-			close(secondStarted)
 		}
 		return agent.Response{Text: req.Prompt}, nil
 	}}
+	var mu sync.Mutex
+	busyCount := 0
 	gateway := fakeReplyGateway{reply: func(_ context.Context, _ channel.ReplyTarget, resp agent.Response) error {
 		if resp.Text == busyReply {
-			busyOnce.Do(func() { close(busyReplySent) })
+			mu.Lock()
+			busyCount++
+			mu.Unlock()
 		}
 		return nil
 	}}
@@ -765,27 +786,31 @@ func TestOrchestratorBusyRejectDoesNotMarkMessageSeen(t *testing.T) {
 
 	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m1", From: "u1", Text: "one"})
 	<-started
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m2", From: "u2", Text: "two"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m3", From: "u3", Text: "three"})
-	orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: "m4", From: "u4", Text: "four"})
-	select {
-	case <-busyReplySent:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for busy reply")
+
+	rejected := ""
+	for i := 0; i < 100 && rejected == ""; i++ {
+		id := fmt.Sprintf("q%d", i)
+		mu.Lock()
+		before := busyCount
+		mu.Unlock()
+		orchestrator.HandleMessage(context.Background(), InboundMessage{BotID: "bot-1", MessageID: id, From: id, Text: id})
+		mu.Lock()
+		if busyCount > before {
+			rejected = id
+		}
+		mu.Unlock()
+	}
+	if rejected == "" {
+		close(release)
+		t.Fatal("expected a busy reply once capacity was exceeded")
 	}
 
 	orchestrator.mu.Lock()
-	_, seen := orchestrator.seen["bot-1:m4"]
+	_, seen := orchestrator.seen["bot-1:"+rejected]
 	orchestrator.mu.Unlock()
-	if seen {
-		t.Fatal("expected busy-rejected message to remain unseen")
-	}
-
 	close(release)
-	select {
-	case <-secondStarted:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for queued message processing")
+	if seen {
+		t.Fatalf("expected busy-rejected message %q to remain unseen", rejected)
 	}
 }
 

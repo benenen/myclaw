@@ -201,7 +201,7 @@ func (o *BotMessageOrchestrator) ensureWorker(botID string, state *botState) {
 	o.mu.Unlock()
 
 	go o.runAccept(botID, worker, state)
-	go o.runDeliver(botID, state)
+	go o.runDeliver(state)
 	if pending != nil {
 		worker.queue <- *pending
 	}
@@ -298,20 +298,20 @@ func (o *BotMessageOrchestrator) accept(botID string, msg InboundMessage) (deliv
 
 // runDeliver serially runs each turn and pushes its result to the channel.
 // It is the long-lived resp goroutine; it exits only when StopBot closes stopCh.
-func (o *BotMessageOrchestrator) runDeliver(botID string, state *botState) {
+func (o *BotMessageOrchestrator) runDeliver(state *botState) {
 	for {
 		select {
 		case <-state.stopCh:
 			return
 		case item := <-state.handoff:
-			o.executeAndDeliver(botID, state, item)
+			o.executeAndDeliver(state, item)
 		}
 	}
 }
 
 // executeAndDeliver runs one turn via the blocking executor.Send and delivers
 // the outcome: reply + progress finalize + session persist + dedup finish.
-func (o *BotMessageOrchestrator) executeAndDeliver(botID string, state *botState, item deliveryItem) {
+func (o *BotMessageOrchestrator) executeAndDeliver(state *botState, item deliveryItem) {
 	ctx, cancel := o.deliverContext(state, item.msg, item.spec.Timeout)
 	defer cancel()
 
