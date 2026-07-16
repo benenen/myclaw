@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -248,7 +250,7 @@ func TestBotConnectionManagerForwardsRuntimeEvent(t *testing.T) {
 	var got channel.RuntimeEvent
 	manager := NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, nil, func(ev channel.RuntimeEvent) {
 		got = ev
-	})
+	}, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -269,7 +271,7 @@ func TestBotConnectionManagerWithoutEventHandlerStillStarts(t *testing.T) {
 	starter := &capturingRuntimeStarter{}
 	bots := newBotRepoStub(domain.Bot{ID: "bot_1", ChannelType: "wechat", ChannelAccountID: "acct_1"})
 	accounts := newAccountRepoStub(domain.ChannelAccount{ID: "acct_1", AccountUID: "wxid_1", CredentialCiphertext: []byte(`{"openid":"wxid_1"}`), CredentialVersion: 1})
-	manager := NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, nil, nil)
+	manager := NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, nil, nil, nil)
 
 	if err := manager.Start(ctx, "bot_1"); err != nil {
 		t.Fatal(err)
@@ -327,6 +329,26 @@ func TestBotConnectionManagerMarksBotLoginRequiredOnSessionExpired(t *testing.T)
 		t.Fatalf("unexpected session expiry error message: %s", bots.bot.ConnectionError)
 	}
 	waitFor(func() bool { return !manager.Active("bot_1") }, t)
+}
+
+func TestBotConnectionManagerInvokesOnStopWhenStopped(t *testing.T) {
+	var mu sync.Mutex
+	var stopped []string
+	onStop := func(botID string) {
+		mu.Lock()
+		stopped = append(stopped, botID)
+		mu.Unlock()
+	}
+	bot := domain.Bot{ID: "bot-1", ChannelType: "wechat", ChannelAccountID: "acc-1"}
+	m := NewBotConnectionManagerWithCallbacks(newBotRepoStub(bot), nil, nil, nil, nil, nil, onStop)
+
+	m.handleState(bot, channel.RuntimeStateEvent{State: channel.RuntimeStateStopped})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(stopped, []string{"bot-1"}) {
+		t.Fatalf("stopped = %#v", stopped)
+	}
 }
 
 func waitFor(check func() bool, t *testing.T) {

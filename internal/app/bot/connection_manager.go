@@ -23,17 +23,18 @@ type BotConnectionManager struct {
 	cipher   *security.Cipher
 	logger   *logging.Logger
 	onEvent  func(channel.RuntimeEvent)
+	onStop   func(botID string)
 }
 
 func NewBotConnectionManager(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, logger *logging.Logger) *BotConnectionManager {
-	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, logger, nil)
+	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, nil, logger, nil, nil)
 }
 
 func NewBotConnectionManagerWithCipher(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger) *BotConnectionManager {
-	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, cipher, logger, nil)
+	return NewBotConnectionManagerWithCallbacks(bots, accounts, starter, cipher, logger, nil, nil)
 }
 
-func NewBotConnectionManagerWithCallbacks(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger, onEvent func(channel.RuntimeEvent)) *BotConnectionManager {
+func NewBotConnectionManagerWithCallbacks(bots domain.BotRepository, accounts domain.ChannelAccountRepository, starter channel.RuntimeStarter, cipher *security.Cipher, logger *logging.Logger, onEvent func(channel.RuntimeEvent), onStop func(botID string)) *BotConnectionManager {
 	return &BotConnectionManager{
 		handles:  make(map[string]channel.RuntimeHandle),
 		bots:     bots,
@@ -42,6 +43,7 @@ func NewBotConnectionManagerWithCallbacks(bots domain.BotRepository, accounts do
 		cipher:   cipher,
 		logger:   logger,
 		onEvent:  onEvent,
+		onStop:   onStop,
 	}
 }
 
@@ -137,6 +139,12 @@ func (m *BotConnectionManager) remove(botID string) {
 	delete(m.handles, botID)
 }
 
+func (m *BotConnectionManager) notifyStop(botID string) {
+	if m.onStop != nil {
+		m.onStop(botID)
+	}
+}
+
 func (m *BotConnectionManager) handleState(bot domain.Bot, ev channel.RuntimeStateEvent) {
 	switch ev.State {
 	case channel.RuntimeStateConnected:
@@ -154,8 +162,10 @@ func (m *BotConnectionManager) handleState(bot domain.Bot, ev channel.RuntimeSta
 		}
 		_, _ = m.bots.Update(context.Background(), bot)
 		m.remove(bot.ID)
+		m.notifyStop(bot.ID)
 	case channel.RuntimeStateStopped:
 		m.remove(bot.ID)
+		m.notifyStop(bot.ID)
 	}
 }
 

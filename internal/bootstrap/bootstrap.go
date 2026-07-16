@@ -127,6 +127,8 @@ func New(cfg config.Config) (*App, error) {
 	hookManager := hook.NewManager(botRepo, resolver, executor)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, multiProvider, cipher, logger, func(ev channel.RuntimeEvent) {
 		orchestrator.HandleEvent(context.Background(), ev)
+	}, func(botID string) {
+		orchestrator.StopBot(botID)
 	})
 	botSvc := bot.NewBotService(userRepo, botRepo, bindingRepo, accountRepo, capabilityRepo, cipher, multiProvider, botManager, mcpSvc)
 	botSvc.SetWorkspaceRoot(cfg.BotWorkspaceRoot())
