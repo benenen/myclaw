@@ -116,3 +116,36 @@ func TestStopBotCancelsInFlightAndRemovesState(t *testing.T) {
 		t.Fatalf("expected no reply on StopBot, got %#v", replies)
 	}
 }
+
+// StopBot on an in-flight orchestrator turn must finalize its progress session
+// (Fail), otherwise the Feishu flush goroutine leaks and the trace card sticks.
+func TestStopBotFinalizesInFlightProgressSession(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	exec := &fakeExecutor{send: func(ctx context.Context, _ string, _ agent.Spec, _ agent.Request) (agent.Response, error) {
+		once.Do(func() { close(started) })
+		<-ctx.Done()
+		return agent.Response{}, ctx.Err()
+	}}
+	gateway := fakeReplyGateway{reply: func(context.Context, channel.ReplyTarget, agent.Response) error { return nil }}
+	resolver := fakeResolver{resolve: func(context.Context, string) (agent.Spec, error) {
+		return agent.Spec{Orchestrator: true, Timeout: time.Minute, QueueSize: 1}, nil
+	}}
+	sess := &fakeProgressSession{}
+	o := NewBotMessageOrchestrator(exec, gateway, resolver, nil)
+	o.SetProgressReporter(&fakeProgressReporter{sess: sess})
+
+	o.HandleMessage(context.Background(), InboundMessage{BotID: "brain_1", MessageID: "m1", From: "u1", Text: "go"})
+	<-started
+
+	o.StopBot("brain_1")
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if sess.counts().failed == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("expected StopBot to Fail the in-flight session, counts = %+v", sess.counts())
+}

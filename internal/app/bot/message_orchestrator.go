@@ -188,6 +188,14 @@ func (o *BotMessageOrchestrator) HandleEvent(ctx context.Context, ev channel.Run
 
 func (o *BotMessageOrchestrator) ensureWorker(botID string, state *botState) {
 	o.mu.Lock()
+	if o.bots[botID] != state {
+		// StopBot removed/replaced this state between admitMessage and here;
+		// spawning goroutines now would bind them to a stopCh no future StopBot
+		// can reach (leak). The pending message's seen entry was cleared by
+		// StopBot, so it is treated as never received.
+		o.mu.Unlock()
+		return
+	}
 	if state.worker != nil {
 		o.mu.Unlock()
 		return
@@ -254,6 +262,7 @@ func (o *BotMessageOrchestrator) runAccept(botID string, worker *botWorker, stat
 			select {
 			case state.handoff <- item:
 			case <-state.stopCh:
+				o.finalizeSessionOnStop(item.sess)
 				o.finishMessage(item.msg, false)
 				return
 			}
@@ -309,6 +318,20 @@ func (o *BotMessageOrchestrator) runDeliver(state *botState) {
 	}
 }
 
+// finalizeSessionOnStop finalizes an in-flight progress session when the bot is
+// being torn down by StopBot, so the session's background flush goroutine exits
+// (Feishu's flushLoop leaks otherwise) and the trace card is not left stuck on
+// "processing". Uses a fresh bounded context because the delivery context is
+// already cancelled by the stop.
+func (o *BotMessageOrchestrator) finalizeSessionOnStop(sess channel.ProgressSession) {
+	if sess == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), replyTimeout)
+	defer cancel()
+	sess.Fail(ctx, failedReply)
+}
+
 // executeAndDeliver runs one turn via the blocking executor.Send and delivers
 // the outcome: reply + progress finalize + session persist + dedup finish.
 func (o *BotMessageOrchestrator) executeAndDeliver(state *botState, item deliveryItem) {
@@ -328,6 +351,7 @@ func (o *BotMessageOrchestrator) executeAndDeliver(state *botState, item deliver
 	resp, err := o.executor.Send(ctx, item.msg.BotID, item.spec, req)
 	if err != nil {
 		if o.isStopping(state) {
+			o.finalizeSessionOnStop(item.sess)
 			o.finishMessage(item.msg, false)
 			return
 		}
