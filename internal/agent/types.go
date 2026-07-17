@@ -36,6 +36,26 @@ type Spec struct {
 	ResumeSessionID string
 }
 
+// ScheduledTask is a periodic prompt registered on a bot's session. Each tick
+// synthesizes one normal turn; its response is delivered through the
+// session's PushSink instead of being paired with an inbound request.
+type ScheduledTask struct {
+	ID       string
+	Interval time.Duration
+	Prompt   string
+}
+
+// PushResponse is one driver-initiated response: the outcome of a scheduled
+// tick (or a future non-request trigger), not paired with an inbound request.
+type PushResponse struct {
+	Response
+	TaskID string
+}
+
+// PushSink receives driver-initiated responses. Implementations must return
+// quickly and never panic; a nil sink drops pushes.
+type PushSink func(PushResponse)
+
 type Request struct {
 	BotID     string
 	UserID    string
