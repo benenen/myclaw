@@ -90,7 +90,7 @@ func (r *ExecRuntime) Run(ctx context.Context, req agent.Request) (agent.Respons
 	} else if strings.TrimSpace(r.spec.WorkDir) != "" {
 		cmd.Dir = r.spec.WorkDir
 	}
-	if env := flattenEnv(r.spec.Env); len(env) > 0 {
+	if env := agent.FlattenEnv(r.spec.Env); len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
 

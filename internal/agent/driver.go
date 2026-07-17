@@ -17,6 +17,26 @@ type SessionRuntime interface {
 
 type DriverFactory func() Driver
 
+type RuntimeState string
+
+const (
+	StateStarting RuntimeState = "starting"
+	StateReady    RuntimeState = "ready"
+	StateRunning  RuntimeState = "running"
+	StateBroken   RuntimeState = "broken"
+)
+
+func FlattenEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(env))
+	for k, v := range env {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
 var (
 	driversMu sync.RWMutex
 	drivers   = map[string]DriverFactory{}

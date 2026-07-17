@@ -32,7 +32,7 @@ type ACPRuntime struct {
 	stdin     io.WriteCloser
 	scanner   *bufio.Scanner
 	stderr    *acpStderrWriter
-	state     runtimeState
+	state     agent.RuntimeState
 	readErr   error
 	closeOnce sync.Once
 
@@ -113,7 +113,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	if workDir := strings.TrimSpace(spec.WorkDir); workDir != "" {
 		cmd.Dir = workDir
 	}
-	if env := flattenEnv(spec.Env); len(env) > 0 {
+	if env := agent.FlattenEnv(spec.Env); len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
 
@@ -139,7 +139,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 		stdin:   stdin,
 		scanner: bufio.NewScanner(stdout),
 		stderr:  stderr,
-		state:   stateStarting,
+		state:   agent.StateStarting,
 		pending: make(map[int64]chan acpRPCResponse),
 	}
 	runtime.scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -168,7 +168,7 @@ func (d *ACPDriver) Init(ctx context.Context, spec agent.Spec) (agent.SessionRun
 	}
 
 	runtime.mu.Lock()
-	runtime.state = stateReady
+	runtime.state = agent.StateReady
 	runtime.mu.Unlock()
 	return runtime, nil
 }
@@ -183,7 +183,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 	}
 
 	r.mu.Lock()
-	if r.state == stateBroken {
+	if r.state == agent.StateBroken {
 		err := r.readErr
 		if err == nil {
 			err = fmt.Errorf("codex acp runtime is broken")
@@ -191,7 +191,7 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 		r.mu.Unlock()
 		return agent.Response{}, err
 	}
-	r.state = stateRunning
+	r.state = agent.StateRunning
 	r.mu.Unlock()
 
 	start := time.Now()
@@ -281,8 +281,8 @@ func (r *ACPRuntime) Run(ctx context.Context, req agent.Request) (agent.Response
 					return agent.Response{}, err
 				}
 				r.mu.Lock()
-				if r.state != stateBroken {
-					r.state = stateReady
+				if r.state != agent.StateBroken {
+					r.state = agent.StateReady
 				}
 				r.mu.Unlock()
 				slog.Info("agent turn done", "bot_id", r.spec.BotID, "runtime", runtimeTypeCodex, "duration", time.Since(start))
@@ -310,7 +310,7 @@ func (r *ACPRuntime) Close() error {
 		cmd := r.cmd
 		r.stdin = nil
 		r.cmd = nil
-		r.state = stateBroken
+		r.state = agent.StateBroken
 		r.readErr = errors.New("codex acp runtime is closed")
 		r.mu.Unlock()
 
@@ -752,7 +752,7 @@ func (r *ACPRuntime) markBroken(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.readErr = err
-	r.state = stateBroken
+	r.state = agent.StateBroken
 }
 
 type acpStderrWriter struct {
