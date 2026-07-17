@@ -226,6 +226,10 @@ v1 任务生命周期 = session 生命周期(进程重启、session 替换即丢
 - **单轮失败**:tick 的 Send 失败只记日志、不终止任务;session Broken 时停止该 session 的全部任务(session 重建后由持久化层或用户重新注册);
 - **进度卡片**:tick 不走 orchestrator 的 accept 流程,没有 ProgressSession——定时任务只推最终 resp,不渲染过程卡片(如需卡片,后续把 `beginProgress` 暴露给推送路径即可)。
 
-## 4. 顺带发现(与本文无关的疑点)
+## 4. 顺带发现并已修复的缺陷
 
-`admitMessage` 对 `MessageID == ""` 的消息有一个循环入队逻辑(`message_orchestrator.go:526-539`):它会持续向 worker.queue 塞同一条消息直到队列满。当 `queueSize > 1` 且队列有多个空位时,同一条消息会被处理多次。定时任务如果走「合成空 MessageID 消息」路线,会踩到这个行为,实施前应先确认/修正。
+1. **`admitMessage` 空 MessageID 循环入队**(已修):旧代码对 `MessageID == ""` 的消息会持续向 worker.queue 塞同一条消息直到队列满,`queueSize > 1` 时同一条消息被处理多次。改为只入队一次(满则拒),与有 id 的路径一致。回归:`TestAdmitMessageEmptyIDEnqueuesOnce`。
+
+2. **`sessionFor` 持 `m.mu` 期间调 `Matches/State`**(已修):这两个方法要拿会话的轮次锁 `s.mu`,而一个 turn 会全程持 `s.mu`。若某 bot 正在跑 turn 时,又有第二个 `Send`(hook / a2a dispatch 与 orchestrator 并发)进入 `sessionFor`,它会持着 `m.mu` 阻塞在 `s.mu` 上——**冻结整个 Manager(所有 bot)** 直到该 turn 结束。改为先在 `m.mu` 下取会话指针,再在释放 `m.mu` 后评估 `Matches/State`。回归:`TestManagerSessionForDoesNotFreezeManagerDuringBusyTurn`。这也是 §3.2 调度死锁(`Manager.Schedule` 绕开 `sessionFor`)的同源问题,现已从 `sessionFor` 本体根除。
+
+3. **codex 跳过 http MCP server**(已修):`codexMCPArgs` 旧代码对所有 http 类型 MCP server 一律跳过,导致 codex bot(如 wx)拿不到 myclaw 的任何工具(schedule_task / list_agents / dispatch 等)。codex ≥ 0.140(实测 0.144.5)支持 streamable HTTP MCP(`mcp_servers.<name>.url`),已改为注入 http server(带 per-bot `?bot_id=`)。回归:`TestResolveCodexInjectsHTTPServersAsURL`。注意:codex 0.144.5 有 `ToolSearchAlwaysDeferMcpTools`,MCP 工具对模型是「延迟/需搜索」暴露的(与 claude 直接可见不同),真实 `codex app-server` 路径下 wx 已能用 a2a 工具,故预期可用;`codex exec` 无头模式对延迟工具的暴露不同,不能作为判据。
