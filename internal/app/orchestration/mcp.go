@@ -19,6 +19,9 @@ type MCPService struct {
 	registry Registry
 	tasks    *TaskStore
 	runner   *Runner
+	// Scheduled-task tools; nil until SetScheduler wires them.
+	scheduler TaskScheduler
+	specs     SpecResolver
 }
 
 func NewMCPService(registry Registry, tasks *TaskStore, runner *Runner) *MCPService {
@@ -157,7 +160,31 @@ func NewMCPHandler(svc *MCPService) http.Handler {
 		return nil, out, err
 	})
 
-	return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "schedule_task",
+		Description: "Schedule a recurring prompt on your own session (e.g. report CPU usage every minute). Each tick's result is pushed to your chat. Returns a task_id.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ScheduleTaskInput) (*mcp.CallToolResult, ScheduleTaskOutput, error) {
+		out, err := svc.ScheduleTask(ctx, in)
+		return nil, out, err
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cancel_scheduled_task",
+		Description: "Cancel one of your scheduled recurring tasks by task_id.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CancelScheduledTaskInput) (*mcp.CallToolResult, CancelScheduledTaskOutput, error) {
+		out, err := svc.CancelScheduledTask(ctx, in)
+		return nil, out, err
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_scheduled_tasks",
+		Description: "List your active scheduled recurring tasks.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, ListScheduledTasksOutput, error) {
+		out, err := svc.ListScheduledTasks(ctx)
+		return nil, out, err
+	})
+
+	return botIDMiddleware(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
-	}, &mcp.StreamableHTTPOptions{Stateless: false})
+	}, &mcp.StreamableHTTPOptions{Stateless: false}))
 }

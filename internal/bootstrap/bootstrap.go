@@ -123,6 +123,7 @@ func New(cfg config.Config) (*App, error) {
 	localRunner := orchestration.NewLocalRunner(resolver, executor)
 	runner := orchestration.NewRunner(localRunner, orchestration.NewA2AClient(nil))
 	mcpService := orchestration.NewMCPService(registeredAgentRepo, taskStore, runner)
+	mcpService.SetScheduler(executor, resolver)
 	messageSimulator := bot.NewMessageSimulator(botRepo, accountRepo, cipher, orchestrator)
 	hookManager := hook.NewManager(botRepo, resolver, executor)
 	botManager := bot.NewBotConnectionManagerWithCallbacks(botRepo, accountRepo, multiProvider, cipher, logger, func(ev channel.RuntimeEvent) {

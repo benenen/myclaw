@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -186,10 +187,23 @@ type mcpEntry struct {
 	Args                           []string
 }
 
+// perBotMCPURL appends bot_id to the myclaw MCP URL so the server can
+// identify the calling bot (needed by the scheduled-task tools).
+func perBotMCPURL(base, botID string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	q := u.Query()
+	q.Set("bot_id", botID)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func (r *BotCLIResolver) collectMCPServers(ctx context.Context, botID string) []mcpEntry {
 	var out []mcpEntry
 	if r.mcpURL != "" {
-		out = append(out, mcpEntry{Name: "myclaw", ServerType: mcpserver.TypeHTTP, URL: r.mcpURL})
+		out = append(out, mcpEntry{Name: "myclaw", ServerType: mcpserver.TypeHTTP, URL: perBotMCPURL(r.mcpURL, botID)})
 	}
 	if r.mcpServers != nil {
 		servers, err := r.mcpServers.ListEnabledByBot(ctx, botID)
