@@ -1298,6 +1298,7 @@ func TestOrchestratorMarksMessageSeenAfterSuccessfulRetry(t *testing.T) {
 
 type fakeExecutor struct {
 	send func(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error)
+	push executorPushState
 }
 
 func (m *fakeExecutor) Send(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error) {

@@ -45,6 +45,12 @@ type replyGateway interface {
 
 type executor interface {
 	Send(ctx context.Context, botID string, spec agent.Spec, req agent.Request) (agent.Response, error)
+	// SetPushSink registers the receiver for the bot's driver-initiated
+	// responses (scheduled tasks); the sink must survive session recreation.
+	SetPushSink(botID string, sink agent.PushSink)
+	// StopBot closes the bot's agent session, stopping its scheduled tasks
+	// and releasing the CLI process.
+	StopBot(botID string)
 }
 
 // progressReporter begins a per-turn trace session; nil session = no tracing.
@@ -69,6 +75,9 @@ type botState struct {
 	stopCh    chan struct{}     // closed by StopBot to stop both goroutines
 	active    int
 	queueSize int
+	// lastReplyTarget is where driver-initiated pushes (scheduled tasks) are
+	// delivered: the reply target of the bot's most recent inbound message.
+	lastReplyTarget channel.ReplyTarget
 }
 
 type seenMessageState struct {
@@ -208,11 +217,50 @@ func (o *BotMessageOrchestrator) ensureWorker(botID string, state *botState) {
 	state.stopCh = make(chan struct{})
 	o.mu.Unlock()
 
+	o.executor.SetPushSink(botID, func(pr agent.PushResponse) {
+		o.deliverPush(botID, pr)
+	})
 	go o.runAccept(botID, worker, state)
 	go o.runDeliver(state)
 	if pending != nil {
 		worker.queue <- *pending
 	}
+}
+
+// deliverPush sends one driver-initiated response (scheduled-task tick) to the
+// bot's most recent reply target. Pushes arriving before any inbound message
+// established a target are dropped with a log line.
+func (o *BotMessageOrchestrator) deliverPush(botID string, pr agent.PushResponse) {
+	o.mu.Lock()
+	state, ok := o.bots[botID]
+	var target channel.ReplyTarget
+	if ok {
+		target = state.lastReplyTarget
+	}
+	o.mu.Unlock()
+	if !ok || target.RecipientID == "" {
+		log.Printf("push dropped, no reply target: bot_id=%s task_id=%s", botID, pr.TaskID)
+		return
+	}
+	msg := InboundMessage{BotID: botID, ReplyTarget: target}
+	o.replyWithTimeout(context.Background(), msg, pr.Response)
+}
+
+// rememberReplyTarget records where the bot's driver-initiated pushes should
+// go: the reply target of its most recent inbound message.
+func (o *BotMessageOrchestrator) rememberReplyTarget(msg InboundMessage) {
+	target := msg.ReplyTarget
+	if target.RecipientID == "" {
+		target.RecipientID = msg.From
+	}
+	if target.RecipientID == "" {
+		return
+	}
+	o.mu.Lock()
+	if state, ok := o.bots[msg.BotID]; ok {
+		state.lastReplyTarget = target
+	}
+	o.mu.Unlock()
 }
 
 func (o *BotMessageOrchestrator) resizeWorkerQueue(botID string, queueSize int) {
@@ -275,6 +323,7 @@ func (o *BotMessageOrchestrator) runAccept(botID string, worker *botWorker, stat
 // replies + finishes and returns ok=false.
 func (o *BotMessageOrchestrator) accept(botID string, msg InboundMessage) (deliveryItem, bool) {
 	o.markMessageStarted(msg)
+	o.rememberReplyTarget(msg)
 	resolveCtx, cancelResolve := o.processingContext(msg.Ctx, 0)
 	spec, err := o.resolver.Resolve(resolveCtx, botID)
 	cancelResolve()
@@ -619,6 +668,11 @@ func (o *BotMessageOrchestrator) StopBot(botID string) {
 		}
 	}
 	o.mu.Unlock()
+
+	// Close the bot's agent session so scheduled tasks stop and the CLI
+	// process is released. Outside o.mu: the close waits for any in-flight
+	// (already cancelled) turn to unwind.
+	o.executor.StopBot(botID)
 }
 
 func (o *BotMessageOrchestrator) SetProcessingTimeoutForTest(d time.Duration) {
