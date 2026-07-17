@@ -132,13 +132,25 @@ func buildTextContent(p SendParams) string {
 	return string(encoded)
 }
 
-var headingRe = regexp.MustCompile(`^\s{0,3}#{1,6}\s`)
+var (
+	headingRe = regexp.MustCompile(`^\s{0,3}#{1,6}\s`)
+	// **bold** with non-empty content on a single line.
+	boldRe = regexp.MustCompile(`\*\*[^*\n]+\*\*`)
+	// A bullet (-, *, +) or ordered (1.) list item: marker, space, content.
+	listItemRe = regexp.MustCompile(`(?m)^\s*([-*+]|\d+\.)\s+\S`)
+	// [text](url) link.
+	linkRe = regexp.MustCompile(`\[[^\]\n]+\]\([^)\s]+\)`)
+)
 
-// isRichMarkdown reports whether text contains markdown that is unreadable as
-// raw text — a fenced code block, an ATX heading, or a table — and therefore
-// should be rendered via a feishu interactive card rather than plain text.
+// isRichMarkdown reports whether text contains markdown that renders as literal
+// noise in feishu plain text — fenced code, an ATX heading, a table, **bold**,
+// a bullet/ordered list, or a [link] — and therefore should be sent as a feishu
+// interactive markdown card instead of a plain-text message.
 func isRichMarkdown(text string) bool {
 	if strings.Contains(text, "```") {
+		return true
+	}
+	if boldRe.MatchString(text) || listItemRe.MatchString(text) || linkRe.MatchString(text) {
 		return true
 	}
 	lines := strings.Split(text, "\n")

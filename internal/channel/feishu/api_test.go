@@ -52,11 +52,18 @@ func TestBuildTextContentMentionStillValidJSON(t *testing.T) {
 
 func TestIsRichMarkdown(t *testing.T) {
 	rich := map[string]string{
-		"table":             "header\n| a | b |\n|---|---|\n| 1 | 2 |",
-		"code fence":        "see this:\n```go\nfmt.Println(\"hi\")\n```",
-		"heading":           "# Title\nbody",
-		"heading indented":  "   ### Sub\ntext",
+		"table":               "header\n| a | b |\n|---|---|\n| 1 | 2 |",
+		"code fence":          "see this:\n```go\nfmt.Println(\"hi\")\n```",
+		"heading":             "# Title\nbody",
+		"heading indented":    "   ### Sub\ntext",
 		"table no outer pipe": "a | b\n--- | ---\n1 | 2",
+		// Inline markdown that renders as literal noise in feishu plain text.
+		"bold":         "this is **bold** text",
+		"bullet list":  "- one\n- two\n- three",
+		"star bullet":  "* one\n* two",
+		"ordered list": "1. first\n2. second",
+		"link":         "see [docs](https://example.com)",
+		"cpu report":   "🖥️ **服务器资源**（2026-07-17 03:03:16）\n**CPU 使用率 13%** ｜ **内存 60%**\n\n- ✅ 新闻推送：已停\n- ✅ 每分钟 CPU/内存汇报：在跑",
 	}
 	for name, text := range rich {
 		if !isRichMarkdown(text) {
@@ -65,11 +72,10 @@ func TestIsRichMarkdown(t *testing.T) {
 	}
 	plain := map[string]string{
 		"prose":        "hello there, how are you",
-		"bold only":    "this is **bold** and _italic_",
-		"list only":    "- one\n- two\n- three",
-		"link only":    "see [docs](https://example.com)",
+		"ack":          "收到，正在处理…",
 		"hr not table": "above\n---\nbelow",
 		"midline hash": "see issue #5 for details",
+		"midline dash": "wait - then continue",
 		"empty":        "",
 	}
 	for name, text := range plain {
