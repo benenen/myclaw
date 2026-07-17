@@ -537,7 +537,7 @@ func TestResolveCodexUsesDashCNotMcpConfig(t *testing.T) {
 	}
 }
 
-func TestResolveCodexSkipsHTTPServers(t *testing.T) {
+func TestResolveCodexInjectsHTTPServersAsURL(t *testing.T) {
 	bots := newBotRepoStub(domain.Bot{
 		ID:                "bot_codex_http",
 		Name:              "codex-http-bot",
@@ -553,24 +553,48 @@ func TestResolveCodexSkipsHTTPServers(t *testing.T) {
 			Available:      true,
 		},
 	}}
-	// MCPURL set (built-in myclaw http server would be collected) + no stdio attached
+	// MCPURL set (built-in myclaw http server) + an attached stdio server: codex
+	// must get BOTH, http via mcp_servers.<name>.url and stdio via command/args.
 	r := NewBotCLIResolver(bots, capabilities, &agentSessionRepoStub{}, BotCLIResolverConfig{
 		Timeout: time.Minute,
 		MCPURL:  "http://127.0.0.1:8080/mcp",
 	})
-	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{}})
+	r.SetMCPServerRepository(stubMCPServerRepo{byBot: map[string][]domain.MCPServer{
+		"bot_codex_http": {
+			{ID: "mcp_a2a", Name: "a2a", ServerType: "stdio", Command: "/usr/local/bin/a2a-mcp", Args: []string{"--config", "/x.json"}, Enabled: true},
+		},
+	}})
 
 	spec, err := r.Resolve(context.Background(), "bot_codex_http")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	joined := strings.Join(spec.Args, " ")
-	if strings.Contains(joined, "mcp_servers.myclaw") {
-		t.Fatalf("codex must NOT get -c mcp_servers.myclaw (http skipped), args: %v", spec.Args)
-	}
-	if strings.Contains(joined, "--mcp-config") {
+	if strings.Contains(strings.Join(spec.Args, " "), "--mcp-config") {
 		t.Fatalf("codex must NOT get --mcp-config, args: %v", spec.Args)
+	}
+
+	var myclawURL, a2aCmd string
+	for i, arg := range spec.Args {
+		if arg != "-c" || i+1 >= len(spec.Args) {
+			continue
+		}
+		next := spec.Args[i+1]
+		if strings.HasPrefix(next, "mcp_servers.myclaw.url=") {
+			myclawURL = next
+		}
+		if strings.HasPrefix(next, "mcp_servers.a2a.command=") {
+			a2aCmd = next
+		}
+	}
+	if myclawURL == "" {
+		t.Fatalf("codex must get -c mcp_servers.myclaw.url=..., args: %v", spec.Args)
+	}
+	if !strings.Contains(myclawURL, "bot_id=bot_codex_http") {
+		t.Fatalf("myclaw url must carry per-bot bot_id, got: %q", myclawURL)
+	}
+	if a2aCmd == "" {
+		t.Fatalf("codex must still get stdio a2a via command, args: %v", spec.Args)
 	}
 }
 

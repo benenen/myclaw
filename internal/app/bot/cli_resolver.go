@@ -245,25 +245,30 @@ func mcpConfigJSON(entries []mcpEntry) (string, bool) {
 	return string(data), true
 }
 
-// codexMCPArgs renders `-c mcp_servers.*` overrides for STDIO servers (codex has
-// no --mcp-config; http servers are skipped — codex injection is stdio-only here).
+// codexMCPArgs renders `-c mcp_servers.*` overrides for each MCP server (codex
+// has no --mcp-config). STDIO servers get command+args; HTTP servers get a url
+// (codex >= 0.140 speaks streamable HTTP). The value after `=` is parsed as
+// TOML, so strings are emitted quoted.
 func codexMCPArgs(entries []mcpEntry) []string {
 	var args []string
 	for _, e := range entries {
-		if e.ServerType != mcpserver.TypeStdio {
-			if e.ServerType == mcpserver.TypeHTTP {
-				log.Printf("codex: skipping http mcp server %q (stdio-only injection)", e.Name)
+		switch e.ServerType {
+		case mcpserver.TypeStdio:
+			argsJSON, _ := json.Marshal(e.Args)
+			if e.Args == nil {
+				argsJSON = []byte("[]")
 			}
-			continue
+			args = append(args,
+				"-c", fmt.Sprintf("mcp_servers.%s.command=%q", e.Name, e.Command),
+				"-c", fmt.Sprintf("mcp_servers.%s.args=%s", e.Name, string(argsJSON)),
+			)
+		case mcpserver.TypeHTTP:
+			args = append(args,
+				"-c", fmt.Sprintf("mcp_servers.%s.url=%q", e.Name, e.URL),
+			)
+		default:
+			log.Printf("codex: skipping mcp server %q (unknown type %q)", e.Name, e.ServerType)
 		}
-		argsJSON, _ := json.Marshal(e.Args)
-		if e.Args == nil {
-			argsJSON = []byte("[]")
-		}
-		args = append(args,
-			"-c", fmt.Sprintf("mcp_servers.%s.command=%q", e.Name, e.Command),
-			"-c", fmt.Sprintf("mcp_servers.%s.args=%s", e.Name, string(argsJSON)),
-		)
 	}
 	return args
 }
