@@ -107,13 +107,16 @@ func (m *Manager) State(botID string) SessionState {
 }
 
 func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Session, error) {
+	// Read the pointer under m.mu, then evaluate Matches/State (which lock the
+	// session's turn mutex s.mu) with m.mu released. Holding m.mu across an
+	// s.mu acquisition freezes the whole Manager whenever that session is
+	// mid-turn (s.mu held for the turn's duration).
 	m.mu.Lock()
-	session, ok := m.sessions[botID]
-	if ok && session.Matches(spec) && session.State() != SessionStateBroken {
-		m.mu.Unlock()
+	session := m.sessions[botID]
+	m.mu.Unlock()
+	if session != nil && session.Matches(spec) && session.State() != SessionStateBroken {
 		return session, nil
 	}
-	m.mu.Unlock()
 
 	driver, err := driverForSpec(spec)
 	if err != nil {
@@ -124,19 +127,19 @@ func (m *Manager) sessionFor(ctx context.Context, botID string, spec Spec) (*Ses
 		return nil, err
 	}
 
-	var stale *Session
 	m.mu.Lock()
-	session, ok = m.sessions[botID]
-	if ok && session.Matches(spec) && session.State() != SessionStateBroken {
-		m.mu.Unlock()
+	current := m.sessions[botID]
+	m.mu.Unlock()
+	if current != nil && current.Matches(spec) && current.State() != SessionStateBroken {
 		if err := replacement.Close(); err != nil {
 			return nil, err
 		}
-		return session, nil
+		return current, nil
 	}
-	if ok {
-		stale = session
-	}
+
+	var stale *Session
+	m.mu.Lock()
+	stale = m.sessions[botID]
 	m.sessions[botID] = replacement
 	sink := m.sinks[botID]
 	m.mu.Unlock()
