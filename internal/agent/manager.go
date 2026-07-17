@@ -33,12 +33,17 @@ func (m *Manager) SetPushSink(botID string, sink PushSink) {
 	}
 }
 
-// Schedule registers a periodic task on the bot's session, creating the
-// session on demand like Send does.
-func (m *Manager) Schedule(ctx context.Context, botID string, spec Spec, task ScheduledTask) (string, error) {
-	session, err := m.sessionFor(ctx, botID, spec)
-	if err != nil {
-		return "", err
+// Schedule registers a periodic task on the bot's existing session. Scheduling
+// attaches to the already-running agent: it never creates or replaces a session
+// (that path locks the turn mutex via sessionFor/Matches/State and would
+// deadlock a schedule_task call the agent makes from inside its own turn). It
+// returns an error when the bot has no live session.
+func (m *Manager) Schedule(botID string, task ScheduledTask) (string, error) {
+	m.mu.Lock()
+	session := m.sessions[botID]
+	m.mu.Unlock()
+	if session == nil {
+		return "", fmt.Errorf("no active session for bot %s", botID)
 	}
 	return session.Schedule(task)
 }

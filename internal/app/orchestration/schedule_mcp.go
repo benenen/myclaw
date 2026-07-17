@@ -15,9 +15,10 @@ import (
 const minScheduleInterval = time.Second
 
 // TaskScheduler is the scheduling side of the agent session manager.
-// Satisfied by *agent.Manager.
+// Satisfied by *agent.Manager. Schedule attaches to the bot's existing session,
+// so it takes no spec and never blocks on the turn lock.
 type TaskScheduler interface {
-	Schedule(ctx context.Context, botID string, spec agent.Spec, task agent.ScheduledTask) (string, error)
+	Schedule(botID string, task agent.ScheduledTask) (string, error)
 	CancelTask(botID, taskID string) bool
 	Tasks(botID string) []agent.ScheduledTask
 }
@@ -25,9 +26,8 @@ type TaskScheduler interface {
 // SetScheduler wires the scheduled-task tools. Until it is called the
 // schedule_task/cancel_scheduled_task/list_scheduled_tasks tools return a
 // configuration error.
-func (s *MCPService) SetScheduler(scheduler TaskScheduler, specs SpecResolver) {
+func (s *MCPService) SetScheduler(scheduler TaskScheduler) {
 	s.scheduler = scheduler
-	s.specs = specs
 }
 
 type botIDKey struct{}
@@ -113,11 +113,7 @@ func (s *MCPService) ScheduleTask(ctx context.Context, in ScheduleTaskInput) (Sc
 	if strings.TrimSpace(in.Prompt) == "" {
 		return ScheduleTaskOutput{}, fmt.Errorf("prompt is required")
 	}
-	spec, err := s.specs.Resolve(ctx, botID)
-	if err != nil {
-		return ScheduleTaskOutput{}, fmt.Errorf("resolve bot %s: %w", botID, err)
-	}
-	taskID, err := scheduler.Schedule(ctx, botID, spec, agent.ScheduledTask{Interval: interval, Prompt: in.Prompt})
+	taskID, err := scheduler.Schedule(botID, agent.ScheduledTask{Interval: interval, Prompt: in.Prompt})
 	if err != nil {
 		return ScheduleTaskOutput{}, err
 	}

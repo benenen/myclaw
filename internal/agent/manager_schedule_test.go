@@ -7,6 +7,22 @@ import (
 	"time"
 )
 
+// establishSession sends one throwaway turn so the bot has a live session that
+// Schedule can attach to (Schedule no longer creates sessions on demand).
+func establishSession(t *testing.T, mgr *Manager, botID string, spec Spec) {
+	t.Helper()
+	if _, err := mgr.Send(context.Background(), botID, spec, Request{Prompt: "init"}); err != nil {
+		t.Fatalf("Send() to establish session error = %v", err)
+	}
+}
+
+func TestManagerScheduleWithoutSessionErrors(t *testing.T) {
+	mgr := NewManager()
+	if _, err := mgr.Schedule("bot-1", ScheduledTask{Interval: time.Minute, Prompt: "tick"}); err == nil {
+		t.Fatal("expected error scheduling on a bot with no session")
+	}
+}
+
 func TestManagerSchedulePushesThroughRegisteredSink(t *testing.T) {
 	driverName := "test-manager-schedule-driver-" + t.Name()
 	registerTestDriver(t, driverName, func() Driver {
@@ -19,16 +35,18 @@ func TestManagerSchedulePushesThroughRegisteredSink(t *testing.T) {
 
 	mgr := NewManager()
 	pushes := make(chan PushResponse, 16)
-	// Sink registered before any session exists: Schedule must create the
-	// session on demand and inject the sink.
+	// Sink registered before the session exists; sessionFor injects it when the
+	// session is created by the establishing Send.
 	mgr.SetPushSink("bot-1", func(pr PushResponse) { pushes <- pr })
+	t.Cleanup(func() { mgr.StopBot("bot-1") })
 
 	spec := Spec{Type: driverName, Command: "codex"}
-	taskID, err := mgr.Schedule(context.Background(), "bot-1", spec, ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "check cpu"})
+	establishSession(t, mgr, "bot-1", spec)
+
+	taskID, err := mgr.Schedule("bot-1", ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "check cpu"})
 	if err != nil {
 		t.Fatalf("Schedule() error = %v", err)
 	}
-	t.Cleanup(func() { mgr.StopBot("bot-1") })
 
 	pr := waitPush(t, pushes)
 	if pr.TaskID != taskID {
@@ -55,7 +73,8 @@ func TestManagerSinkSurvivesSessionRecreation(t *testing.T) {
 	t.Cleanup(func() { mgr.StopBot("bot-1") })
 
 	alpha := Spec{Type: driverName, Command: "alpha"}
-	if _, err := mgr.Schedule(context.Background(), "bot-1", alpha, ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tick"}); err != nil {
+	establishSession(t, mgr, "bot-1", alpha)
+	if _, err := mgr.Schedule("bot-1", ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tick"}); err != nil {
 		t.Fatalf("Schedule(alpha) error = %v", err)
 	}
 	waitPush(t, pushes)
@@ -67,7 +86,7 @@ func TestManagerSinkSurvivesSessionRecreation(t *testing.T) {
 	}
 
 	// The replacement session must inherit the sink without re-registration.
-	if _, err := mgr.Schedule(context.Background(), "bot-1", beta, ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tock"}); err != nil {
+	if _, err := mgr.Schedule("bot-1", ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tock"}); err != nil {
 		t.Fatalf("Schedule(beta) error = %v", err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -104,7 +123,8 @@ func TestManagerStopBotClosesSessionAndStopsTasks(t *testing.T) {
 	mgr.SetPushSink("bot-1", func(pr PushResponse) { pushes <- pr })
 
 	spec := Spec{Type: driverName, Command: "codex"}
-	taskID, err := mgr.Schedule(context.Background(), "bot-1", spec, ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tick"})
+	establishSession(t, mgr, "bot-1", spec)
+	taskID, err := mgr.Schedule("bot-1", ScheduledTask{Interval: 10 * time.Millisecond, Prompt: "tick"})
 	if err != nil {
 		t.Fatalf("Schedule() error = %v", err)
 	}
@@ -150,7 +170,8 @@ func TestManagerCancelTask(t *testing.T) {
 	mgr := NewManager()
 	t.Cleanup(func() { mgr.StopBot("bot-1") })
 	spec := Spec{Type: driverName, Command: "codex"}
-	taskID, err := mgr.Schedule(context.Background(), "bot-1", spec, ScheduledTask{ID: "cpu-watch", Interval: time.Minute, Prompt: "tick"})
+	establishSession(t, mgr, "bot-1", spec)
+	taskID, err := mgr.Schedule("bot-1", ScheduledTask{ID: "cpu-watch", Interval: time.Minute, Prompt: "tick"})
 	if err != nil {
 		t.Fatalf("Schedule() error = %v", err)
 	}
@@ -186,7 +207,8 @@ func TestManagerTasksListsSessionTasks(t *testing.T) {
 	}
 
 	spec := Spec{Type: driverName, Command: "codex"}
-	if _, err := mgr.Schedule(context.Background(), "bot-1", spec, ScheduledTask{ID: "cpu-watch", Interval: time.Minute, Prompt: "tick"}); err != nil {
+	establishSession(t, mgr, "bot-1", spec)
+	if _, err := mgr.Schedule("bot-1", ScheduledTask{ID: "cpu-watch", Interval: time.Minute, Prompt: "tick"}); err != nil {
 		t.Fatalf("Schedule() error = %v", err)
 	}
 	tasks := mgr.Tasks("bot-1")

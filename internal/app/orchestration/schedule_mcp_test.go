@@ -15,18 +15,16 @@ import (
 type fakeScheduler struct {
 	mu        sync.Mutex
 	botIDs    []string
-	specs     []agent.Spec
 	scheduled []agent.ScheduledTask
 	canceled  []string
 	cancelOK  bool
 	tasks     map[string][]agent.ScheduledTask
 }
 
-func (f *fakeScheduler) Schedule(_ context.Context, botID string, spec agent.Spec, task agent.ScheduledTask) (string, error) {
+func (f *fakeScheduler) Schedule(botID string, task agent.ScheduledTask) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.botIDs = append(f.botIDs, botID)
-	f.specs = append(f.specs, spec)
 	f.scheduled = append(f.scheduled, task)
 	return "task-1", nil
 }
@@ -48,7 +46,7 @@ func (f *fakeScheduler) Tasks(botID string) []agent.ScheduledTask {
 
 func newScheduleTestService(sched *fakeScheduler) *MCPService {
 	svc, _ := newTestService()
-	svc.SetScheduler(sched, fakeResolver{spec: agent.Spec{Command: "claude"}})
+	svc.SetScheduler(sched)
 	return svc
 }
 
@@ -75,9 +73,6 @@ func TestMCPScheduleTask(t *testing.T) {
 	}
 	if sched.scheduled[0].Prompt != "check cpu" {
 		t.Fatalf("prompt = %q", sched.scheduled[0].Prompt)
-	}
-	if sched.specs[0].Command != "claude" {
-		t.Fatalf("spec.Command = %q (expected resolver spec)", sched.specs[0].Command)
 	}
 }
 

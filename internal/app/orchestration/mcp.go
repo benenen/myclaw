@@ -21,7 +21,6 @@ type MCPService struct {
 	runner   *Runner
 	// Scheduled-task tools; nil until SetScheduler wires them.
 	scheduler TaskScheduler
-	specs     SpecResolver
 }
 
 func NewMCPService(registry Registry, tasks *TaskStore, runner *Runner) *MCPService {
