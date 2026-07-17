@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	east "github.com/yuin/goldmark/extension/ast"
+	gtext "github.com/yuin/goldmark/text"
 )
 
 // apiClient is the real feishuAPI. Credential validation uses plain REST
@@ -132,55 +136,49 @@ func buildTextContent(p SendParams) string {
 	return string(encoded)
 }
 
-var (
-	headingRe = regexp.MustCompile(`^\s{0,3}#{1,6}\s`)
-	// **bold** with non-empty content on a single line.
-	boldRe = regexp.MustCompile(`\*\*[^*\n]+\*\*`)
-	// A bullet (-, *, +) or ordered (1.) list item: marker, space, content.
-	listItemRe = regexp.MustCompile(`(?m)^\s*([-*+]|\d+\.)\s+\S`)
-	// [text](url) link.
-	linkRe = regexp.MustCompile(`\[[^\]\n]+\]\([^)\s]+\)`)
-)
+// markdownParser is a CommonMark parser (+ GFM tables/strikethrough) used to
+// decide whether a reply should render as a feishu markdown card. Linkify is
+// deliberately NOT enabled: a bare URL renders fine as plain text and should
+// not force a card. The parser is stateless and safe for concurrent reuse.
+var markdownParser = goldmark.New(
+	goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+).Parser()
 
-// isRichMarkdown reports whether text contains markdown that renders as literal
-// noise in feishu plain text — fenced code, an ATX heading, a table, **bold**,
-// a bullet/ordered list, or a [link] — and therefore should be sent as a feishu
-// interactive markdown card instead of a plain-text message.
-func isRichMarkdown(text string) bool {
-	if strings.Contains(text, "```") {
-		return true
-	}
-	if boldRe.MatchString(text) || listItemRe.MatchString(text) || linkRe.MatchString(text) {
-		return true
-	}
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		if headingRe.MatchString(line) {
-			return true
-		}
-		if strings.Contains(line, "|") && i+1 < len(lines) && isTableSeparator(lines[i+1]) {
-			return true
-		}
-	}
-	return false
+// richMarkdownKinds are the AST node kinds whose presence means the text
+// carries markdown formatting that renders as literal noise in feishu plain
+// text, so the reply should be sent as an interactive markdown card instead.
+var richMarkdownKinds = map[ast.NodeKind]bool{
+	ast.KindHeading:         true,
+	ast.KindList:            true,
+	ast.KindBlockquote:      true,
+	ast.KindFencedCodeBlock: true,
+	ast.KindCodeBlock:       true,
+	ast.KindThematicBreak:   true,
+	ast.KindEmphasis:        true,
+	ast.KindLink:            true,
+	ast.KindAutoLink:        true,
+	ast.KindImage:           true,
+	ast.KindCodeSpan:        true,
+	east.KindTable:          true,
+	east.KindStrikethrough:  true,
 }
 
-// isTableSeparator reports whether a line is a GFM table separator row — only
-// |, -, :, and whitespace, with at least one - and one | (so a bare "---"
-// horizontal rule is not mistaken for a table).
-func isTableSeparator(line string) bool {
-	s := strings.TrimSpace(line)
-	if !strings.ContainsRune(s, '-') || !strings.ContainsRune(s, '|') {
-		return false
-	}
-	for _, r := range s {
-		switch r {
-		case '|', '-', ':', ' ', '\t':
-		default:
-			return false
+// isRichMarkdown parses text as CommonMark and reports whether it contains any
+// formatting node (heading, list, emphasis, link, code, table, …). Parsing
+// respects CommonMark rules — code spans suppress inner markers, emphasis
+// flanking is honored, mid-line "#"/"-" are not headings/lists — which a line
+// regex cannot do.
+func isRichMarkdown(text string) bool {
+	doc := markdownParser.Parse(gtext.NewReader([]byte(text)))
+	rich := false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if entering && richMarkdownKinds[n.Kind()] {
+			rich = true
+			return ast.WalkStop, nil
 		}
-	}
-	return true
+		return ast.WalkContinue, nil
+	})
+	return rich
 }
 
 // buildCardContent builds the feishu interactive-card JSON for a markdown reply:

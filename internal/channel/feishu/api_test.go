@@ -64,6 +64,9 @@ func TestIsRichMarkdown(t *testing.T) {
 		"ordered list": "1. first\n2. second",
 		"link":         "see [docs](https://example.com)",
 		"cpu report":   "🖥️ **服务器资源**（2026-07-17 03:03:16）\n**CPU 使用率 13%** ｜ **内存 60%**\n\n- ✅ 新闻推送：已停\n- ✅ 每分钟 CPU/内存汇报：在跑",
+		// "---" under a text line is a setext H2 heading in CommonMark, not an
+		// HR — goldmark correctly treats it as a heading (the line regex could not).
+		"setext heading": "above\n---\nbelow",
 	}
 	for name, text := range rich {
 		if !isRichMarkdown(text) {
@@ -71,12 +74,14 @@ func TestIsRichMarkdown(t *testing.T) {
 		}
 	}
 	plain := map[string]string{
-		"prose":        "hello there, how are you",
-		"ack":          "收到，正在处理…",
-		"hr not table": "above\n---\nbelow",
-		"midline hash": "see issue #5 for details",
-		"midline dash": "wait - then continue",
-		"empty":        "",
+		"prose":           "hello there, how are you",
+		"ack":             "收到，正在处理…",
+		"multiline prose": "line one\nline two\nline three",
+		"midline hash":    "see issue #5 for details",
+		"midline dash":    "wait - then continue",
+		"bare url":        "see https://example.com for details",
+		"inline star":     "2 * 3 * 4 = 24",
+		"empty":           "",
 	}
 	for name, text := range plain {
 		if isRichMarkdown(text) {
