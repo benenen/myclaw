@@ -3,7 +3,6 @@ module github.com/benenen/myclaw
 go 1.23.6
 
 require (
-	github.com/GianlucaP106/gotmux v0.5.0
 	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.6
 	github.com/oklog/ulid/v2 v2.1.1
