@@ -573,17 +573,13 @@ func (o *BotMessageOrchestrator) admitMessage(msg InboundMessage) (*botState, bo
 	}
 
 	if msg.MessageID == "" {
-		queuedOnce := false
-		for {
-			select {
-			case state.worker.queue <- msg:
-				queuedOnce = true
-			default:
-				if queuedOnce {
-					return state, true, false
-				}
-				return nil, false, false
-			}
+		// No dedup key, so enqueue exactly once (like the keyed path below);
+		// a full queue means reject.
+		select {
+		case state.worker.queue <- msg:
+			return state, true, false
+		default:
+			return nil, false, false
 		}
 	}
 
